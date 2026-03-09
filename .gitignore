@@ -12,3 +12,4 @@ credentials/
 data/
 oauth_config/
 notification.json
+public/uploads/
