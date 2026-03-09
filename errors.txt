@@ -1,4 +1,0 @@
-﻿src/whatsapp.ts(266,28): error TS7006: Parameter 'm' implicitly has an 'any' type.
-src/whatsapp.ts(289,58): error TS2345: Argument of type '{ document: { url: string; }; fileName: string | undefined; }' is not assignable to parameter of type 'AnyMessageContent'.
-  Type '{ document: { url: string; }; fileName: string | undefined; }' is not assignable to type '{ document: WAMediaUpload; mimetype: string; fileName?: string | undefined; caption?: string | undefined; } & Contextable & { mimetype?: string | undefined; } & Editable & ViewOnce'.
-    Property 'mimetype' is missing in type '{ document: { url: string; }; fileName: string | undefined; }' but required in type '{ document: WAMediaUpload; mimetype: string; fileName?: string | undefined; caption?: string | undefined; }'.
