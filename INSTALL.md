@@ -2,6 +2,17 @@
 
 Este guia fornece o passo a passo completo para configurar o **AgendaBot** do zero, desde as credenciais do Google até a conexão final com o WhatsApp.
 
+### Limpeza Profunda do Sistema (Wipe Total)
+Se a sua Raspberry Pi já tem outros projetos e você quer "formatar" o ambiente Docker e limpar logs de sistema para começar o AgendaBot do zero absoluto:
+```bash
+# CUIDADO: Isso remove TODOS os containers e imagens Docker da máquina!
+bash scripts/pi-clean.sh
+```
+
+---
+
+## 🛑 Troubleshooting (Solução de Problemas)
+
 ---
 
 ## 🛠️ Passo 1: Configuração no Google Cloud Console
