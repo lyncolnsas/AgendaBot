@@ -1,72 +1,51 @@
 #!/bin/bash
 set -e
 
-# AgendaBot - Script de Instalação Completa
-# Alvo: Linux / Raspberry Pi (Docker)
+# AgendaBot - Script de Instalação 100% Automatizada
+# Alvo: Linux / Raspberry Pi
 
 echo "---------------------------------------------------"
-echo "🚀 Iniciando instalação do AgendaBot..."
+echo "🚀 Iniciando Instalador Automático do AgendaBot"
 echo "---------------------------------------------------"
 
-# 1. Verificar dependências essenciais
-echo "🔍 Verificando dependências..."
+# 1. Auto-instalação de dependências do sistema
+echo "🔍 Verificando Docker..."
 if ! command -v docker &> /dev/null; then
-    echo "❌ Docker não encontrado. Por favor, instale o Docker: https://docs.docker.com/get-docker/"
-    exit 1
+    echo "⚠️ Docker não encontrado. Instalando automaticamente..."
+    curl -fsSL https://get.docker.com | sh
+    sudo usermod -aG docker $USER
+    echo "✅ Docker instalado. Por favor, reinicie sua sessão após a instalação ou use: sg docker -c 'bash scripts/install.sh'"
+    # Nota: Tentando continuar no contexto atual
 fi
 
-# Nota: Docker Compose V2 é acessado via 'docker compose'
 if ! docker compose version &> /dev/null; then
-    echo "❌ Docker Compose não encontrado ou versão antiga. Atualize o Docker para incluir o plugin compose."
-    exit 1
+    echo "⚠️ Docker Compose não encontrado. Instalando plugin..."
+    sudo apt-get update && sudo apt-get install -y docker-compose-v2
 fi
 
-# 2. Preparar ambiente local
-echo "📁 Preparando diretórios e arquivos base..."
+# 2. Configuração Silenciosa de Pastas e Arquivos
+echo "📁 Preparando ambiente..."
 mkdir -p credentials auth_info_baileys public/uploads
 
-# Arquivo .env base
-if [ ! -f .env ]; then
-    echo "📝 Criando .env padrão..."
-    cat <<EOT > .env
-NODE_ENV=production
-PORT=3001
-EOT
-fi
+[ ! -f .env ] && echo -e "NODE_ENV=production\nPORT=3001" > .env
+[ ! -f notification.json ] && echo '{"whatsappNumber": "55000000000@s.whatsapp.net"}' > notification.json
+[ ! -f calendar_id.txt ] && touch calendar_id.txt
 
-# Arquivo notification.json base
-if [ ! -f notification.json ]; then
-    echo "📝 Criando notification.json padrão..."
-    cat <<EOT > notification.json
-{
-  "whatsappNumber": "SEU_NUMERO_AQUI@s.whatsapp.net"
-}
-EOT
-fi
-
-# Arquivo calendar_id.txt base
-if [ ! -f calendar_id.txt ]; then
-    echo "📝 Criando calendar_id.txt vazio..."
-    touch calendar_id.txt
-fi
-
-# 3. Limpeza de builds anteriores (opcional mas recomendado)
-echo "🧹 Limpando restos de builds anteriores..."
-rm -rf dist
-
-# 4. Build e Start via Docker Compose
-echo "📦 Construindo imagem Docker (pode demorar no Raspberry Pi)..."
+# 3. Build e Start (Forçado)
+echo "📦 Construindo containers (Processo Silencioso)..."
+docker compose down --remove-orphans > /dev/null 2>&1
 docker compose build --no-cache
 
-echo "⚡ Iniciando o serviço em modo detached..."
-docker compose down > /dev/null 2>&1
+echo "⚡ Subindo AgendaBot..."
 docker compose up -d
 
-# 5. Finalização
+# 4. Finalização e Pronto para Uso
 echo "---------------------------------------------------"
-echo "✅ Instalação concluída com sucesso!"
+echo "✅ AgendaBot está 100% INSTALADO e RODANDO!"
 echo "---------------------------------------------------"
-echo "👉 Painel Web: http://localhost:3001"
-echo "👉 Para ler o QR Code do WhatsApp, execute:"
-echo "   docker logs -f agendabot_pi"
+echo "🔗 URL Local: http://localhost:3001"
+echo "📸 PRÓXIMO PASSO: Escaneie o QR Code do WhatsApp abaixo:"
 echo "---------------------------------------------------"
+echo "Executando logs para exibir QR Code... (aperte Ctrl+C para sair quando conectar)"
+sleep 3
+docker logs -f agendabot_pi
