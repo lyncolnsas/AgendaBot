@@ -4,15 +4,16 @@
 
 Se você quer apenas começar agora no seu Raspberry Pi, execute estes dois comandos:
 
-### 1. Limpeza total (Caso queira zerar a Pi antes):
+### 1. Limpeza total (Wipe do Raspberry Pi):
 ```bash
-curl -sSL https://raw.githubusercontent.com/lyncolnsas/AgendaBot/main/scripts/pi-clean.sh -o pi-clean.sh && bash pi-clean.sh
+# Rode isso direto no terminal do Raspberry para zerar TUDO
+bash scripts/formatar.sh
 ```
 
-### 2. Instalação Completa Automatizada:
-```bash
-curl -sSL https://raw.githubusercontent.com/lyncolnsas/AgendaBot/main/scripts/install.sh -o install.sh && bash install.sh
-```
+### 2. Instalação Recomendada (Via Windows):
+Se você está no Windows, o jeito **mais seguro e rápido** (evita erros de memória no Pi) é:
+1. Abra o PowerShell na pasta do projeto.
+2. Execute: `./install.ps1`
 
 ---
 
@@ -106,7 +107,7 @@ bash scripts/install.sh
 ```
 
 > [!IMPORTANT]
-> Se estiver em um Raspberry Pi, o processo de "Build" pode demorar alguns minutos pois o TypeScript é compilado dentro do container para economizar memória em tempo de execução.
+> **COMPILAÇÃO LOCAL:** Para evitar erros de "Out of Memory" no Raspberry Pi, a compilação do TypeScript agora é feita no seu computador local (Windows) através do script `install.ps1`. O Raspberry Pi apenas executa o resultado pronto.
 
 ---
 
@@ -127,9 +128,10 @@ Após o script terminar, o bot estará rodando, mas esperando conexão.
 
 ## 🛠️ Comandos de Manutenção
 
--   **Ver logs**: `docker logs -f agendabot_pi`
+-   **Ver logs**: `docker logs -f agendabot-agendabot-1`
 -   **Reiniciar**: `bash scripts/start.sh`
 -   **Resetar (Clean Install)**: `bash scripts/clean.sh`
+-   **Formatação Total (Wipe)**: `bash scripts/formatar.sh`
 -   **Atualizar código**: `git pull` e em seguida `bash scripts/start.sh`
 
 ---
