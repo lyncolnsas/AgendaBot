@@ -41,6 +41,20 @@ if ! docker compose version &> /dev/null; then
     sudo apt-get update && sudo apt-get install -y docker-compose-v2
 fi
 
+# 1.1 Otimização de Memória (Swap)
+MEM_TOTAL=$(free -m | awk '/^Mem:/{print $2}')
+if [ "$MEM_TOTAL" -lt 1500 ]; then
+    echo "⚠️ Memória RAM baixa detectada ($MEM_TOTAL MB)."
+    if [ $(free -m | awk '/^Swap:/{print $2}') -lt 1024 ]; then
+        echo "🔧 Criando arquivo SWAP de 2GB para evitar erros de compilação..."
+        sudo fallocate -l 2G /swapfile 2>/dev/null || sudo dd if=/dev/zero of=/swapfile bs=1M count=2048
+        sudo chmod 600 /swapfile
+        sudo mkswap /swapfile
+        sudo swapon /swapfile
+        echo "✅ SWAP ativado."
+    fi
+fi
+
 # 2. Configuração Silenciosa de Pastas e Arquivos
 echo "📁 Preparando ambiente..."
 mkdir -p credentials auth_info_baileys public/uploads
