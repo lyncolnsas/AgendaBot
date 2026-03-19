@@ -8,14 +8,32 @@ echo "---------------------------------------------------"
 echo "🚀 Iniciando Instalador Automático do AgendaBot"
 echo "---------------------------------------------------"
 
+# 0. Verificação de Repositório (Auto-Clone se necessário)
+if [ ! -f "Dockerfile" ]; then
+    echo "📂 Repositório não detectado localmente."
+    echo "📥 Clonando AgendaBot de https://github.com/lyncolnsas/AgendaBot.git ..."
+    
+    if ! command -v git &> /dev/null; then
+        echo "🔧 Instalando git..."
+        sudo apt-get update && sudo apt-get install -y git
+    fi
+    
+    # Clonar na pasta atual se estiver vazia, ou criar subpasta
+    if [ -z "$(ls -A .)" ]; then
+        git clone https://github.com/lyncolnsas/AgendaBot.git .
+    else
+        git clone https://github.com/lyncolnsas/AgendaBot.git agendabot
+        cd agendabot
+    fi
+fi
+
 # 1. Auto-instalação de dependências do sistema
 echo "🔍 Verificando Docker..."
 if ! command -v docker &> /dev/null; then
     echo "⚠️ Docker não encontrado. Instalando automaticamente..."
     curl -fsSL https://get.docker.com | sh
     sudo usermod -aG docker $USER
-    echo "✅ Docker instalado. Por favor, reinicie sua sessão após a instalação ou use: sg docker -c 'bash scripts/install.sh'"
-    # Nota: Tentando continuar no contexto atual
+    echo "✅ Docker instalado."
 fi
 
 if ! docker compose version &> /dev/null; then

@@ -1,5 +1,21 @@
 # 📘 Guia de Instalação Detalhado - AgendaBot
 
+## ⚡ Instalação Super Rápida (One-Liner)
+
+Se você quer apenas começar agora no seu Raspberry Pi, execute estes dois comandos:
+
+### 1. Limpeza total (Caso queira zerar a Pi antes):
+```bash
+curl -sSL https://raw.githubusercontent.com/lyncolnsas/AgendaBot/main/scripts/pi-clean.sh -o pi-clean.sh && bash pi-clean.sh
+```
+
+### 2. Instalação Completa Automatizada:
+```bash
+curl -sSL https://raw.githubusercontent.com/lyncolnsas/AgendaBot/main/scripts/install.sh -o install.sh && bash install.sh
+```
+
+---
+
 Este guia fornece o passo a passo completo para configurar o **AgendaBot** do zero, desde as credenciais do Google até a conexão final com o WhatsApp.
 
 ### Limpeza Profunda do Sistema (Wipe Total)
