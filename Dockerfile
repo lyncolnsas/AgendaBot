@@ -12,12 +12,16 @@ RUN npm install -g pm2
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm install
+RUN npm install --omit=dev
 
-COPY . .
-
-# Compila o typescript para a pasta ./dist/ (limite de memoria para Raspberry Pi)
-RUN NODE_OPTIONS="--max-old-space-size=512" npm run build
+# Copia os arquivos compilados e os arquivos estáticos necessários
+COPY dist ./dist
+COPY public ./public
+COPY credentials ./credentials
+COPY auth_info_baileys ./auth_info_baileys
+COPY scripts ./scripts
+COPY calendar_id.txt ./
+COPY ecosystem.config.cjs ./
 
 # O volume de logs do pm2 e do sistema, e de fotos/uploads publicos sera definido fora
 
