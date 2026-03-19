@@ -6,14 +6,18 @@ Se você quer apenas começar agora no seu Raspberry Pi, execute estes dois coma
 
 ### 1. Limpeza total (Wipe do Raspberry Pi):
 ```bash
-# Rode isso direto no terminal do Raspberry para zerar TUDO
-bash scripts/formatar.sh
+curl -sSL https://raw.githubusercontent.com/lyncolnsas/AgendaBot/main/scripts/formatar.sh -o formatar.sh && bash formatar.sh
 ```
 
 ### 2. Instalação Recomendada (Via Windows):
 Se você está no Windows, o jeito **mais seguro e rápido** (evita erros de memória no Pi) é:
 1. Abra o PowerShell na pasta do projeto.
 2. Execute: `./install.ps1`
+
+### 3. Instalação Manual (Direto no Raspberry):
+```bash
+curl -sSL https://raw.githubusercontent.com/lyncolnsas/AgendaBot/main/scripts/install.sh -o install.sh && bash install.sh
+```
 
 ---
 
