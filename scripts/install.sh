@@ -8,9 +8,9 @@ echo "---------------------------------------------------"
 echo "🚀 Iniciando Instalador Automático do AgendaBot"
 echo "---------------------------------------------------"
 
-# 0. Verificação de Repositório (Auto-Clone se necessário)
+# 0. Verificação de Repositório (Auto-Clone ou Update)
 if [ ! -f "Dockerfile" ]; then
-    echo "📂 Repositório não detectado localmente."
+    echo "📂 Repositório não detectado localmente ou pasta incompleta."
     echo "📥 Clonando AgendaBot de https://github.com/lyncolnsas/AgendaBot.git ..."
     
     if ! command -v git &> /dev/null; then
@@ -25,6 +25,9 @@ if [ ! -f "Dockerfile" ]; then
         git clone https://github.com/lyncolnsas/AgendaBot.git agendabot
         cd agendabot
     fi
+else
+    echo "📂 Repositório detectado. Garantindo que o código está atualizado..."
+    git pull origin main || echo "⚠️ Falha ao atualizar via git pull. Continuando com arquivos locais..."
 fi
 
 # 1. Auto-instalação de dependências do sistema
