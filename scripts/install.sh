@@ -70,9 +70,10 @@ mkdir -p credentials auth_info_baileys public/uploads
 echo "📦 Construindo containers (Processo Silencioso)..."
 echo "⚠️ NOTA: Se você está no Raspberry Pi, isso pode demorar."
 echo "💡 Dica: Se o build falhar (OOM), tente rodar './install.ps1' no seu Windows."
+echo "⚡ Subindo AgendaBot..."
 
 docker compose down --remove-orphans > /dev/null 2>&1
-docker compose up -d --build
+docker compose up -d --build --force-recreate
 
 # 4. Finalização e Pronto para Uso
 echo "---------------------------------------------------"
