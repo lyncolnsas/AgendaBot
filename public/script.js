@@ -1,7 +1,39 @@
-let allContacts = []; // Global contact list
-let quickFavorites = JSON.parse(localStorage.getItem('wa_quick_favorites')) || [null, null, null, null];
+let allContacts = [];
+let cachedEvents = [];
+let sidebarCalendar = null;
+let selectedDateFilter = null; // ISO Date String (YYYY-MM-DD)
 let waModalDismissed = false;
+let quickFavorites = JSON.parse(localStorage.getItem('wa_quick_favorites') || 'null') || [null, null, null, null, null, null];
 const API_BASE = '/v1/config';
+
+/** Robust helper to parse Google Calendar start/end into a Date object */
+function parseGoogleDate(raw) {
+    if (!raw) return null;
+    if (raw instanceof Date) return raw;
+    if (typeof raw === 'object' && (raw.dateTime || raw.date)) return parseGoogleDate(raw.dateTime || raw.date);
+    if (typeof raw === 'string' && raw.length === 10) {
+        const [y, m, d] = raw.split('-').map(Number);
+        return new Date(y, m - 1, d, 0, 0, 0, 0); 
+    }
+    return new Date(raw);
+}
+
+/** Helper to check if a date falls on the same calendar day as another */
+function isSameDay(d1, d2) {
+    if (!d1 || !d2) return false;
+    return d1.getFullYear() === d2.getFullYear() &&
+           d1.getMonth() === d2.getMonth() &&
+           d1.getDate() === d2.getDate();
+}
+
+/** Helper for local YYYY-MM-DD string */
+function toLocaleISO(d) {
+    if (!d) return '';
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+}
 
 function openWaModal() {
     if (waModalDismissed) return;
@@ -30,7 +62,6 @@ function showPage(pageId, event) {
     }
     if (pageId === 'config') {
         listCredentials();
-        loadNotificationSettings();
     }
 }
 
@@ -105,6 +136,9 @@ async function updateStatus() {
 
                 if (document.getElementById('btn-disconnect-wa')) document.getElementById('btn-disconnect-wa').style.display = 'block';
 
+                const manualCallSection = document.getElementById('manual-call-section');
+                if (manualCallSection) manualCallSection.style.display = 'block';
+
                 if (allContacts.length === 0 && !loadingContacts && (data.whatsapp.status === 'connected' || data.whatsapp.status === 'open')) {
                     loadContacts(false);
                 }
@@ -125,6 +159,8 @@ async function updateStatus() {
                 waStatus.innerHTML = '● WhatsApp (Off)';
                 if (waProfile) waProfile.style.display = 'none';
                 if (qrContainer) qrContainer.style.display = 'flex';
+                const manualCallSection = document.getElementById('manual-call-section');
+                if (manualCallSection) manualCallSection.style.display = 'none';
             }
         }
 
@@ -140,6 +176,8 @@ function updateDashboardMetrics(events) {
     let totalMinutes = 0;
     let canceledCount = 0;
     let upcoming7dCount = 0;
+    let postponedCount = 0;
+    let completedCount = 0;
 
     const now = new Date();
     const next7d = new Date();
@@ -149,26 +187,33 @@ function updateDashboardMetrics(events) {
         const startRaw = event.start.dateTime || event.start.date || event.start;
         const endRaw = event.end ? (event.end.dateTime || event.end.date || event.end) : startRaw;
 
-        const startDate = new Date(startRaw);
-        const endDate = new Date(endRaw);
+        const startDate = startRaw ? new Date(startRaw) : null;
+        const endDate = endRaw ? new Date(endRaw) : (startDate || now);
 
         // Calculate Meeting Hours (only for non-all-day events or events with time)
-        if (startRaw.includes('T')) {
+        if (startRaw && startRaw.includes('T') && endDate > startDate) {
             const diffMs = endDate - startDate;
-            if (diffMs > 0) {
-                totalMinutes += diffMs / 60000;
-            }
+            totalMinutes += diffMs / 60000;
         }
 
-        // Detect Canceled Events
         const title = (event.summary || "").toLowerCase();
         const description = (event.description || "").toLowerCase();
-        if (title.includes('cancelado') || description.includes('cancelado')) {
+
+        // Consistent Status Detection
+        const isCanceled = title.includes('cancelado') || description.includes('[canceled]') || event.local_status === 'canceled';
+        const isPostponed = title.includes('adiado') || title.includes('remarcado') || description.includes('[postponed]') || event.local_status === 'postponed';
+        const isDone = title.includes('concluíd') || title.includes('concluid') || description.includes('[done]') || event.local_status === 'done';
+        
+        if (isCanceled) {
             canceledCount++;
+        } else if (isPostponed) {
+            postponedCount++;
+        } else if (isDone || (endDate < now)) {
+            completedCount++;
         }
 
-        // Upcoming 7 Days
-        if (startDate >= now && startDate <= next7d) {
+        // Upcoming 7 Days (somente para eventos ativos com data)
+        if (!isCanceled && !isPostponed && !isDone && startDate && startDate >= now && startDate <= next7d) {
             upcoming7dCount++;
         }
     });
@@ -179,11 +224,15 @@ function updateDashboardMetrics(events) {
     const elTotal = document.getElementById('metric-total-events');
     const elHours = document.getElementById('metric-meeting-hours');
     const elCanceled = document.getElementById('metric-canceled-events');
+    const elPostponed = document.getElementById('metric-postponed-events');
+    const elCompleted = document.getElementById('metric-completed-events');
     const elUpcoming = document.getElementById('metric-upcoming-7d');
 
     if (elTotal) elTotal.innerText = totalEvents;
     if (elHours) elHours.innerText = `${totalHours}h`;
     if (elCanceled) elCanceled.innerText = canceledCount;
+    if (elPostponed) elPostponed.innerText = postponedCount;
+    if (elCompleted) elCompleted.innerText = completedCount;
     if (elUpcoming) elUpcoming.innerText = upcoming7dCount;
 }
 
@@ -262,13 +311,30 @@ function toggleModalEditMode(isEdit) {
     if (calSelect) calSelect.disabled = !isNew;
 }
 
+// Persiste/recupera quais agendas estão desativadas entre sessões
+const DISABLED_CALENDARS_KEY = 'agendabot_disabled_calendars';
+function getDisabledCalendars() {
+    try { return new Set(JSON.parse(localStorage.getItem(DISABLED_CALENDARS_KEY) || '[]')); }
+    catch { return new Set(); }
+}
+function setCalendarDisabled(calId, disabled) {
+    const set = getDisabledCalendars();
+    if (disabled) set.add(calId); else set.delete(calId);
+    localStorage.setItem(DISABLED_CALENDARS_KEY, JSON.stringify([...set]));
+}
+
 async function loadCalendars() {
     try {
         const response = await fetch('/v1/events/calendars');
         if (!response.ok) throw new Error("Failed to load calendars");
         window.availableCalendars = await response.json();
 
-        window.activeCalendars = new Set(window.availableCalendars.map(c => c.id));
+        const disabledCalendars = getDisabledCalendars();
+
+        // Calendários ativos = todos EXCETO os explicitamente desativados
+        window.activeCalendars = new Set(
+            window.availableCalendars.filter(c => !disabledCalendars.has(c.id)).map(c => c.id)
+        );
 
         const filterContainer = document.getElementById('calendar-filters-container');
         if (filterContainer) filterContainer.innerHTML = '';
@@ -277,42 +343,80 @@ async function loadCalendars() {
         if (selectContainer) selectContainer.innerHTML = '';
 
         window.availableCalendars.forEach(cal => {
-            // Checkbox logic
-            const div = document.createElement('div');
-            div.style.display = 'flex';
-            div.style.alignItems = 'center';
-            div.style.gap = '10px';
+            const isActive = !disabledCalendars.has(cal.id);
+            const calColor = cal.backgroundColor || '#3788d8';
 
-            const cb = document.createElement('input');
-            cb.type = 'checkbox';
-            cb.checked = true;
-            cb.value = cal.id;
-            cb.style.accentColor = cal.backgroundColor || '#3788d8';
-            cb.style.width = '18px';
-            cb.style.height = '18px';
-            cb.style.cursor = 'pointer';
+            // ----- Item row -----
+            const row = document.createElement('div');
+            row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:5px 2px;border-radius:6px;transition:background 0.15s;';
+            row.onmouseover = () => row.style.background = 'rgba(255,255,255,0.05)';
+            row.onmouseout  = () => row.style.background = 'transparent';
 
-            cb.onchange = (e) => {
-                if (e.target.checked) window.activeCalendars.add(cal.id);
+            // Bolinha de cor da agenda
+            const dot = document.createElement('span');
+            dot.style.cssText = `width:9px;height:9px;border-radius:50%;background:${calColor};flex-shrink:0;`;
+            row.appendChild(dot);
+
+            // Label (nome da agenda)
+            const label = document.createElement('span');
+            label.innerText = cal.summary;
+            label.title = cal.id;
+            label.style.cssText = `flex:1;font-size:0.82rem;color:${isActive ? 'white' : 'var(--text-muted)'};cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;transition:color 0.2s;`;
+            row.appendChild(label);
+
+            // Toggle switch
+            const toggleLabel = document.createElement('label');
+            toggleLabel.style.cssText = 'position:relative;display:inline-block;width:32px;height:18px;flex-shrink:0;cursor:pointer;';
+
+            const toggleInput = document.createElement('input');
+            toggleInput.type = 'checkbox';
+            toggleInput.checked = isActive;
+            toggleInput.style.cssText = 'opacity:0;width:0;height:0;position:absolute;';
+
+            const slider = document.createElement('span');
+            slider.style.cssText = `
+                position:absolute;top:0;left:0;right:0;bottom:0;
+                background:${isActive ? calColor : 'rgba(255,255,255,0.15)'};
+                border-radius:18px;transition:background 0.25s;
+            `;
+
+            const knob = document.createElement('span');
+            knob.style.cssText = `
+                position:absolute;width:13px;height:13px;border-radius:50%;background:white;
+                top:2.5px;left:${isActive ? '16px' : '2.5px'};transition:left 0.25s;
+                box-shadow:0 1px 3px rgba(0,0,0,0.4);
+            `;
+            slider.appendChild(knob);
+            toggleLabel.appendChild(toggleInput);
+            toggleLabel.appendChild(slider);
+
+            const applyState = (active) => {
+                slider.style.background = active ? calColor : 'rgba(255,255,255,0.15)';
+                knob.style.left = active ? '16px' : '2.5px';
+                label.style.color = active ? 'white' : 'var(--text-muted)';
+                dot.style.opacity = active ? '1' : '0.35';
+            };
+
+            toggleInput.onchange = () => {
+                const active = toggleInput.checked;
+                applyState(active);
+                setCalendarDisabled(cal.id, !active);
+                if (active) window.activeCalendars.add(cal.id);
                 else window.activeCalendars.delete(cal.id);
                 filterAndRenderEvents();
             };
 
-            const label = document.createElement('label');
-            label.innerText = cal.summary;
-            label.style.color = 'white';
-            label.style.cursor = 'pointer';
-            label.onclick = () => cb.click();
+            // Click na label/dot também activa o toggle
+            label.onclick = () => { toggleInput.checked = !toggleInput.checked; toggleInput.dispatchEvent(new Event('change')); };
 
-            div.appendChild(cb);
-            div.appendChild(label);
-            if (filterContainer) filterContainer.appendChild(div);
+            row.appendChild(toggleLabel);
+            if (filterContainer) filterContainer.appendChild(row);
 
-            // Dropdown option logic
+            // Dropdown option (só aparece se a agenda está ativa)
             const opt = document.createElement('option');
             opt.value = cal.id;
             opt.innerText = cal.summary;
-            opt.style.background = cal.backgroundColor || '#3788d8';
+            opt.style.background = calColor;
             opt.style.color = 'white';
             if (selectContainer) selectContainer.appendChild(opt);
         });
@@ -324,36 +428,87 @@ async function loadCalendars() {
     }
 }
 
+
 async function fetchEvents() {
     try {
-        const response = await fetch(`/v1/events?t=${new Date().getTime()}`, {
-            headers: {
-                'Cache-Control': 'no-cache',
-                'Pragma': 'no-cache'
-            }
-        });
+        // Serve do cache do servidor — sem cache-busting, o servidor gerencia a renovação
+        const response = await fetch('/v1/events');
         if (!response.ok) return;
 
         window.cachedEvents = await response.json();
+
+        // Exibe a hora da última atualização do cache (vinda do servidor)
+        const cacheHeader = response.headers.get('X-Cache-Updated');
+        if (cacheHeader && cacheHeader !== 'never') {
+            const updated = new Date(cacheHeader);
+            const timeStr = updated.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+            const el = document.getElementById('cache-last-updated');
+            if (el) el.textContent = `Atualizado às ${timeStr}`;
+        }
+
         filterAndRenderEvents();
     } catch (e) {
         console.error('Error fetching events', e);
     }
 }
 
+// Força um refresh do cache no servidor e recarrega os eventos no frontend
+async function refreshEvents() {
+    const btn = document.getElementById('btn-refresh-events');
+    const el = document.getElementById('cache-last-updated');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Atualizando...'; }
+    if (el) el.textContent = 'Atualizando...';
+    try {
+        const res = await fetch('/v1/events/refresh', { method: 'POST' });
+        if (res.ok) {
+            await fetchEvents();
+        } else {
+            console.error('Refresh falhou');
+            if (el) el.textContent = 'Erro ao atualizar';
+        }
+    } catch (e) {
+        console.error('Refresh error', e);
+        if (el) el.textContent = 'Erro ao atualizar';
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = '🔄 Atualizar'; }
+    }
+}
+
 function filterAndRenderEvents() {
     if (!window.cachedEvents) return;
 
-    // Filter events based on active checkboxes
-    const filteredEvents = window.cachedEvents.filter(e => window.activeCalendars.has(e.calendarId));
+    // Filter events based on active checkboxes (calendars)
+    let filteredEvents = window.cachedEvents.filter(e => window.activeCalendars.has(e.calendarId));
 
-    // Update Monthly List
-    renderMonthlyEvents(filteredEvents);
+    // Also filter by selected date if applicable
+    const eventsForKanban = filteredEvents.filter(event => {
+        if (!selectedDateFilter) return true;
+        const start = parseGoogleDate(event.start);
+        const end = parseGoogleDate(event.end || event.start);
+        if (!start || !end) return false;
+        
+        const startStr = toLocaleISO(start);
+        const endStr = toLocaleISO(end);
+        
+        // Special handling for All Day events end date
+        const isAllDay = (typeof (event.start.date || event.start) === 'string' && (event.start.date || event.start).length === 10);
+        let checkEndStr = endStr;
+        if (isAllDay) {
+            const adjustedEnd = new Date(end.getTime() - 1);
+            checkEndStr = toLocaleISO(adjustedEnd);
+        }
 
-    // Update Dashboard Metrics
-    updateDashboardMetrics(filteredEvents);
+        return selectedDateFilter >= startStr && selectedDateFilter <= checkEndStr;
+    });
 
-    // Format for FullCalendar
+    // Update Monthly List (Kanban)
+    renderMonthlyEvents(eventsForKanban);
+
+    // Update Dashboard Metrics - Metrics usually reflect the whole month or the filtered set? 
+    // Usually metrics reflect what you SEE, so we use eventsForKanban
+    updateDashboardMetrics(eventsForKanban);
+
+    // Format for FullCalendar (The large one in the dashboard, if it exists)
     const eventsForFC = filteredEvents.map(event => {
         let bgColor = '#3788d8'; // default FullCalendar blue
         if (event.colorId && googleColorMap[event.colorId]) {
@@ -475,12 +630,6 @@ function filterAndRenderEvents() {
             hiddenRaw.value = fullDesc;
 
             if (fullDesc) {
-                // Parse Call Reminder [CALL:X]
-                const callMatch = fullDesc.match(/\[CALL:(\d+)\]/);
-                if (callMatch && callMatch[1]) {
-                    document.getElementById('event-call-reminder').value = callMatch[1];
-                }
-
                 // Parse Participants [WA_IDS:name|number, ...]
                 const waMatch = fullDesc.match(/\[WA_IDS:\s*(.*?)\]/);
                 if (waMatch && waMatch[1]) {
@@ -536,22 +685,95 @@ function filterAndRenderEvents() {
     calendarInstance.render();
 }
 
+// ---- Modal Draft Preservation ----
+// Saved draft state so user can return to where they were
+let _modalDraft = null;
+
+function _readModalDraft() {
+    // Only save drafts for NEW events (id is empty)
+    if (document.getElementById('event-id').value !== '') return null;
+    return {
+        title: document.getElementById('event-title')?.value || '',
+        location: document.getElementById('event-location')?.value || '',
+        description: document.getElementById('event-description')?.value || '',
+        startDate: document.getElementById('event-start-date')?.value || '',
+        startTime: document.getElementById('event-start-time')?.value || '',
+        endDate: document.getElementById('event-end-date')?.value || '',
+        endTime: document.getElementById('event-end-time')?.value || '',
+        calendarId: document.getElementById('event-calendar')?.value || '',
+        colorId: document.getElementById('event-color')?.value || '',
+        callReminder: document.getElementById('event-call-reminder')?.value || '',
+        eventType: document.getElementById('event-type')?.value || 'reuniao',
+        groupMode: document.getElementById('event-group-mode')?.value || 'individual',
+        status: document.getElementById('event-status')?.value || 'todo',
+    };
+}
+
+function _hasDraftContent(draft) {
+    if (!draft) return false;
+    return draft.title.trim() !== '' || draft.description.trim() !== '' || draft.location.trim() !== '';
+}
+
+function _restoreDraft(draft) {
+    if (!draft) return;
+    if (document.getElementById('event-title')) document.getElementById('event-title').value = draft.title;
+    if (document.getElementById('event-location')) document.getElementById('event-location').value = draft.location;
+    if (document.getElementById('event-description')) document.getElementById('event-description').value = draft.description;
+    if (document.getElementById('event-start-date')) document.getElementById('event-start-date').value = draft.startDate;
+    if (document.getElementById('event-start-time')) document.getElementById('event-start-time').value = draft.startTime;
+    if (document.getElementById('event-end-date')) document.getElementById('event-end-date').value = draft.endDate;
+    if (document.getElementById('event-end-time')) document.getElementById('event-end-time').value = draft.endTime;
+    if (document.getElementById('event-calendar')) document.getElementById('event-calendar').value = draft.calendarId;
+    if (document.getElementById('event-call-reminder')) document.getElementById('event-call-reminder').value = draft.callReminder;
+    if (draft.eventType && document.getElementById('event-type')) document.getElementById('event-type').value = draft.eventType;
+    if (draft.groupMode && document.getElementById('event-group-mode')) document.getElementById('event-group-mode').value = draft.groupMode;
+    if (draft.status && document.getElementById('event-status')) document.getElementById('event-status').value = draft.status;
+    selectColor(draft.colorId || '');
+    toggleGroupFields();
+}
 
 function closeModal() {
+    // Save draft if there is meaningful unsaved content in a new-event form
+    const draft = _readModalDraft();
+    if (_hasDraftContent(draft)) {
+        _modalDraft = draft;
+    } else {
+        _modalDraft = null;
+    }
     document.getElementById('event-modal').style.display = 'none';
 }
 
+// Click outside modal → close with draft preservation  
+document.addEventListener('DOMContentLoaded', () => {
+    const overlay = document.getElementById('event-modal');
+    if (overlay) {
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) closeModal();
+        });
+    }
+});
+
 // Function to open the create modal directly from the "Eventos" tab UI
 function openCreateModal() {
-    document.getElementById('event-id').value = "";
+    document.getElementById('event-id').value = '';
     toggleModalEditMode(true);
 
+    // ---- Restore draft if user started typing before closing ----
+    if (_hasDraftContent(_modalDraft)) {
+        _restoreDraft(_modalDraft);
+        document.getElementById('event-modal').style.display = 'flex';
+        return; // Done: kept their draft
+    }
+
+    // No draft: fresh form
+    _modalDraft = null;
+
     // Reset Group Modes
-    if (document.getElementById('event-group-mode')) document.getElementById('event-group-mode').value = "individual";
+    if (document.getElementById('event-group-mode')) document.getElementById('event-group-mode').value = 'individual';
     toggleGroupFields();
 
-    document.getElementById('event-title').value = "";
-    document.getElementById('event-location').value = "";
+    document.getElementById('event-title').value = '';
+    document.getElementById('event-location').value = '';
 
     const calendarSelect = document.getElementById('event-calendar');
     if (calendarSelect && window.activeCalendars.size > 0) {
@@ -559,25 +781,27 @@ function openCreateModal() {
     }
     if (calendarSelect) calendarSelect.disabled = false;
 
-    if (document.getElementById('event-description')) document.getElementById('event-description').value = "";
-    if (document.getElementById('event-call-reminder')) document.getElementById('event-call-reminder').value = "";
-    if (document.getElementById('event-type')) document.getElementById('event-type').value = "reuniao"; // Default to meeting
+    if (document.getElementById('event-description')) document.getElementById('event-description').value = '';
+    if (document.getElementById('event-call-reminder')) document.getElementById('event-call-reminder').value = '';
+    if (document.getElementById('event-type')) document.getElementById('event-type').value = 'reuniao';
 
-    // Clear Dyanmic Sections
+    // Clear Dynamic Sections
     if (document.getElementById('participants-container')) {
-        document.getElementById('participants-container').innerHTML = "";
+        document.getElementById('participants-container').innerHTML = '';
         addParticipantRow();
     }
 
     if (document.getElementById('checklists-wrapper')) {
-        document.getElementById('checklists-wrapper').innerHTML = "";
+        document.getElementById('checklists-wrapper').innerHTML = '';
     }
 
     if (document.getElementById('attachments-list')) {
-        document.getElementById('attachments-list').innerHTML = "";
+        document.getElementById('attachments-list').innerHTML = '';
     }
 
-    selectColor("");
+    if (document.getElementById('event-status')) document.getElementById('event-status').value = 'todo';
+
+    selectColor('');
 
     const now = new Date();
     const offset = now.getTimezoneOffset() * 60000;
@@ -632,10 +856,17 @@ async function submitEvent() {
         finalDescription += (finalDescription ? "\n" : "") + `[WA_IDS:${parts.join(', ')}]`;
     }
 
-    const callMinutes = document.getElementById('event-call-reminder').value;
-    if (callMinutes) {
-        finalDescription += (finalDescription ? "\n" : "") + `[CALL:${callMinutes}]`;
-    }
+    // --- Status Manual ---
+    let finalTitle = title;
+    const currentStatus = document.getElementById('event-status').value;
+    
+    // Clean old status tags from title
+    finalTitle = finalTitle.replace(/^\[(CONCLUÍDO|CANCELADO|ADIADO)\]\s*/i, '');
+    
+    // Add new tag if not 'todo'
+    if (currentStatus === 'done') finalTitle = `[CONCLUÍDO] ${finalTitle}`;
+    else if (currentStatus === 'canceled') finalTitle = `[CANCELADO] ${finalTitle}`;
+    else if (currentStatus === 'postponed') finalTitle = `[ADIADO] ${finalTitle}`;
 
     // --- Tags de Grupo ---
     const eventType = document.getElementById('event-type').value;
@@ -652,28 +883,25 @@ async function submitEvent() {
         finalDescription += (finalDescription ? "\n" : "") + `[GROUP_MODE:existing] [GROUP_JID:${groupJid}]`;
     }
 
-    // --- Preservar COLUNA: nunca perder posição do card ---
-    const currentCard = document.getElementById(`card-${eventId}`);
-    let colunaTag = 'todo'; // default only for new events
+    // --- Preservar COLUNA: não forçamos para novos eventos (assim fica automático) ---
+    let colunaTag = null;
     if (eventId) {
-        // Editing: preserve existing COLUNA from original description
+        // Pesquisar tag existente na descrição original
         const rawDesc = (document.getElementById('event-raw-desc') || {}).value || '';
         const colunaMatch = rawDesc.match(/\[COLUNA:([^\]]+)\]/);
         if (colunaMatch) {
             colunaTag = colunaMatch[1];
-        } else if (currentCard) {
-            const colContainer = currentCard.parentElement;
-            if (colContainer && colContainer.id.startsWith('cards-')) {
-                colunaTag = colContainer.id.replace('cards-', '');
-            }
-        }
-    } else if (currentCard) {
-        const colContainer = currentCard.parentElement;
-        if (colContainer && colContainer.id.startsWith('cards-')) {
-            colunaTag = colContainer.id.replace('cards-', '');
         }
     }
-    finalDescription += (finalDescription ? "\n" : "") + `[COLUNA:${colunaTag}]`;
+    if (colunaTag) {
+        finalDescription += (finalDescription ? "\n" : "") + `[COLUNA:${colunaTag}]`;
+    }
+
+    // Se marcou como concluído ou cancelado, forçamos a coluna "done" no Google
+    if (currentStatus === 'done' || currentStatus === 'canceled') {
+        finalDescription = finalDescription.replace(/\[COLUNA:.+?\]/g, '').trim();
+        finalDescription += (finalDescription ? "\n" : "") + `[COLUNA:done]`;
+    }
 
     // --- Persistir Checklists e Anexos ---
     const checklistData = serializeChecklists();
@@ -683,7 +911,7 @@ async function submitEvent() {
     if (attachmentData) finalDescription += `\n${attachmentData}`;
 
     const payload = {
-        summary: title,
+        summary: finalTitle,
         location: location,
         description: finalDescription,
         start: start,
@@ -730,34 +958,79 @@ async function submitEvent() {
     }
 }
 
-async function deleteEvent() {
-    const eventId = document.getElementById('event-id').value;
-    if (!eventId) return;
+let deleteConfirmTimeout = null;
 
-    if (!confirm("Tem certeza que deseja excluir este evento permanentemente?")) {
+async function deleteEvent() {
+    console.log("deleteEvent called!");
+    const eventId = document.getElementById('event-id').value;
+    if (!eventId) {
+        alert("Nenhum evento selecionado.");
         return;
     }
 
-    document.getElementById('btn-delete-event').innerText = "Excluindo...";
-    document.getElementById('btn-delete-event').disabled = true;
+    const deleteBtn = document.getElementById('btn-delete-event');
+    
+    // Step 1: Ask for confirmation visually on the button
+    if (!deleteBtn.dataset.confirm) {
+        console.log("Setting confirm state...");
+        deleteBtn.dataset.confirm = "true";
+        deleteBtn.innerHTML = '<i data-lucide="alert-triangle" style="color: #ef4444;"></i>';
+        deleteBtn.style.background = 'rgba(239, 68, 68, 0.2)';
+        if (window.lucide) lucide.createIcons();
+        
+        // Reset after 4 seconds
+        deleteConfirmTimeout = setTimeout(() => {
+            console.log("Confirm state timeout.");
+            deleteBtn.dataset.confirm = "";
+            deleteBtn.innerHTML = '<i data-lucide="trash-2"></i>';
+            deleteBtn.style.background = 'rgba(255,255,255,0.03)';
+            if (window.lucide) lucide.createIcons();
+        }, 4000);
+        return;
+    }
+
+    // Step 2: Proceed with deletion
+    console.log("Executing deletion for event:", eventId);
+    clearTimeout(deleteConfirmTimeout);
+    deleteBtn.dataset.confirm = "";
+    
+    if (deleteBtn) {
+        deleteBtn.innerHTML = '<i data-lucide="loader" class="fa-spin"></i>';
+        deleteBtn.style.background = 'rgba(255,255,255,0.03)';
+        deleteBtn.disabled = true;
+        if (window.lucide) lucide.createIcons();
+    }
 
     try {
-        const calendarId = window.cachedEvents.find(e => e.id === eventId)?.calendarId || 'primary';
+        let calendarId = 'primary';
+        if (window.cachedEvents) {
+            const ev = window.cachedEvents.find(e => e.id === eventId);
+            if (ev && ev.calendarId) calendarId = ev.calendarId;
+        }
+        
+        console.log("Calling DELETE endpoint for calendar:", calendarId);
         const response = await fetch(`/v1/events/${eventId}?calendarId=${encodeURIComponent(calendarId)}`, {
             method: 'DELETE'
         });
 
         if (response.ok) {
+            console.log("Delete successful.");
             closeModal();
             fetchEvents(); // Refresh calendar
+            alert("Evento excluído com sucesso");
         } else {
+            console.error("Delete failed, response not ok.", response.status);
             alert("Erro ao excluir evento.");
         }
     } catch (e) {
+        console.error("Connection error during delete:", e);
         alert("Erro de conexão.");
     } finally {
-        document.getElementById('btn-delete-event').innerText = "Excluir";
-        document.getElementById('btn-delete-event').disabled = false;
+        if (deleteBtn) {
+            deleteBtn.innerHTML = '<i data-lucide="trash-2"></i>';
+            deleteBtn.disabled = false;
+            if (window.lucide) lucide.createIcons();
+        }
     }
 }
 
@@ -799,7 +1072,7 @@ function renderAgendaList() {
         removeBtn.style.cssText = 'background: rgba(255, 68, 68, 0.2); color: #ff4444; border: 1px solid rgba(255, 68, 68, 0.4); padding: 5px 10px; cursor: pointer; border-radius: 4px; font-size: 1.2rem; margin-left: 10px; transition: background 0.2s;';
         removeBtn.onmouseenter = () => removeBtn.style.background = 'rgba(255, 68, 68, 0.4)';
         removeBtn.onmouseleave = () => removeBtn.style.background = 'rgba(255, 68, 68, 0.2)';
-        removeBtn.onclick = () => removeAgenda(index);
+        removeBtn.onclick = function() { removeAgenda(index, this); };
 
         li.appendChild(textSpan);
         li.appendChild(removeBtn);
@@ -807,8 +1080,21 @@ function renderAgendaList() {
     });
 }
 
-async function removeAgenda(index) {
-    if (!confirm('Deseja remover esta agenda?')) return;
+async function removeAgenda(index, btn) {
+    if (btn && !btn.dataset.confirm) {
+        btn.dataset.confirm = "true";
+        const oldHtml = btn.innerHTML;
+        btn.innerHTML = '⚠️';
+        btn.style.background = 'rgba(255, 160, 0, 0.3)';
+        setTimeout(() => {
+            btn.dataset.confirm = "";
+            btn.innerHTML = oldHtml;
+            btn.style.background = 'rgba(255, 68, 68, 0.2)';
+        }, 3000);
+        return;
+    }
+    
+    if (btn) btn.innerHTML = '⏳';
 
     const oldAgendas = [...savedAgendas];
     savedAgendas.splice(index, 1);
@@ -820,6 +1106,11 @@ async function removeAgenda(index) {
         loadCalendars().then(() => fetchEvents());
     } else {
         savedAgendas = oldAgendas; // revert
+        if (btn) {
+            btn.dataset.confirm = "";
+            btn.innerHTML = '🗑️';
+            btn.style.background = 'rgba(255, 68, 68, 0.2)';
+        }
     }
 }
 
@@ -889,142 +1180,102 @@ function showStatus(id, message, isSuccess) {
     setTimeout(() => { if (el.innerHTML.includes(message)) el.innerHTML = ''; }, 5000);
 }
 
-// --- Google Credentials (JSON) ---
-async function listCredentials() {
-    try {
-        const response = await fetch(`${API_BASE}/google-credentials`);
-        const creds = await response.json();
-        renderCredentialsList(creds);
-    } catch (error) {
-        console.error('Erro ao listar credenciais:', error);
-    }
-}
-
-function renderCredentialsList(creds) {
-    const list = document.getElementById('credentials-list');
-    if (!list) return;
-
-    if (creds.length === 0) {
-        list.innerHTML = '<li style="color: var(--text-muted); font-style: italic; padding: 10px;">Nenhuma conta de serviço vinculada.</li>';
+// --- OAuth2 Logic ---
+async function uploadOAuthJson() {
+    const fileInput = document.getElementById('oauth-file-input');
+    const file = fileInput.files[0];
+    const statusText = document.getElementById('oauth-status-text');
+    
+    if (!file) {
+        alert('Selecione um arquivo JSON primeiro.');
         return;
     }
 
-    list.innerHTML = creds.map(c => `
-        <li style="display: flex; justify-content: space-between; align-items: center; padding: 12px; background: rgba(255,255,255,0.05); border-radius: 4px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 8px;">
-            <div style="display: flex; align-items: center; gap: 10px;">
-                <div style="width: 10px; height: 10px; border-radius: 50%; background: #00ff00;"></div>
-                <span style="font-size: 0.95rem; color: white;">${c.email}</span>
-            </div>
-            <button onclick="deleteCredential('${c.fileName}')" style="background: rgba(255, 68, 68, 0.1); border: 1px solid rgba(255, 68, 68, 0.3); color: #ff4444; cursor: pointer; padding: 5px 8px; border-radius: 4px;">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
-            </button>
-        </li>
-    `).join('');
-}
-
-async function addCredentials() {
-    const jsonText = document.getElementById('new-credentials-json').value;
-    const statusDiv = document.getElementById('credential-status');
-
-    if (!jsonText.trim()) {
-        showStatus('credential-status', 'Por favor, cole o conteúdo do JSON.', false);
-        return;
-    }
+    statusText.innerText = "⏳ Enviando e processando...";
+    statusText.style.color = "var(--warning)";
 
     try {
-        const response = await fetch(`${API_BASE}/google-credentials`, {
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        const response = await fetch('/api/oauth/upload', {
             method: 'POST',
-            body: jsonText
+            body: formData
         });
         const result = await response.json();
 
-        if (result.status === 'success') {
-            document.getElementById('new-credentials-json').value = '';
-            showStatus('credential-status', result.message, true);
-            listCredentials();
-            loadCalendars();
-        } else {
-            showStatus('credential-status', result.message, false);
-        }
-    } catch (error) {
-        showStatus('credential-status', 'Erro ao salvar: ' + error.message, false);
-    }
-}
-
-async function deleteCredential(fileName) {
-    if (!confirm('Deseja realmente remover esta conta de serviço?')) return;
-
-    try {
-        const response = await fetch(`${API_BASE}/google-credentials/${fileName}`, {
-            method: 'DELETE'
-        });
-        const result = await response.json();
-
-        if (result.status === 'success') {
-            listCredentials();
-            loadCalendars();
-        } else {
-            alert('Erro: ' + result.message);
-        }
-    } catch (error) {
-        console.error('Erro ao deletar:', error);
-    }
-}
-
-// --- Notification Settings ---
-async function loadNotificationSettings() {
-    try {
-        const response = await fetch(`${API_BASE}/notifications`);
         if (response.ok) {
-            const data = await response.json();
-            if (data && data.contactNo) {
-                const phoneInput = document.getElementById('notification-phone');
-                if (phoneInput) phoneInput.value = data.contactNo;
-            }
-        }
-    } catch (error) {
-        console.error('Erro ao carregar configurações de notificação:', error);
-    }
-}
-
-async function saveNotificationSettings() {
-    const phoneInput = document.getElementById('notification-phone');
-    if (!phoneInput) return;
-    const contactNo = phoneInput.value.trim();
-    const statusDiv = document.getElementById('notification-status');
-
-    if (!contactNo) {
-        if (statusDiv) statusDiv.innerHTML = '<p style="color: var(--error)">✗ Por favor, insira o número.</p>';
-        return;
-    }
-
-    const btn = event.target;
-    const oldText = btn.innerText;
-    btn.innerText = 'Salvando...';
-    btn.disabled = true;
-
-    try {
-        const response = await fetch(`${API_BASE}/notifications`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ contactNo: contactNo })
-        });
-        const data = await response.json();
-        if (response.ok) {
-            if (statusDiv) {
-                statusDiv.innerHTML = '<p style="color: var(--success)">✓ Configurações de notificação salvas com sucesso!</p>';
-                setTimeout(() => { statusDiv.innerHTML = ''; }, 5000);
-            }
+            statusText.innerText = '✅ JSON configurado! Requer Login.';
+            statusText.style.color = 'var(--success)';
+            document.getElementById('btn-oauth-login').style.display = 'flex';
+            document.getElementById('btn-oauth-logout').style.display = 'none';
         } else {
-            if (statusDiv) statusDiv.innerHTML = `<p style="color: var(--error)">✗ Erro: ${data.message}</p>`;
+            statusText.innerText = '❌ Erro: ' + result.message;
+            statusText.style.color = '#ff4444';
         }
     } catch (e) {
-        if (statusDiv) statusDiv.innerHTML = '<p style="color: var(--error)">✗ Erro de conexão.</p>';
-    } finally {
-        btn.innerText = oldText;
-        btn.disabled = false;
+        statusText.innerText = '❌ Erro de conexão.';
+        statusText.style.color = '#ff4444';
     }
 }
+
+function loginOAuth() {
+    window.location.href = '/api/oauth/login';
+}
+
+async function logoutOAuth() {
+    if (!confirm('Deseja desconectar a integração OAuth? (Isso removerá os tokens)')) return;
+    
+    const statusText = document.getElementById('oauth-status-text');
+    try {
+        const response = await fetch('/api/oauth/logout', { method: 'POST' });
+        if (response.ok) {
+            statusText.innerText = '⚠ Desconectado';
+            statusText.style.color = 'var(--warning)';
+            document.getElementById('btn-oauth-login').style.display = 'flex';
+            document.getElementById('btn-oauth-logout').style.display = 'none';
+            // Refresh
+            loadCalendars().then(fetchEvents);
+        }
+    } catch (e) {
+        alert("Erro ao desconectar.");
+    }
+}
+
+async function checkOAuthStatus() {
+    const statusText = document.getElementById('oauth-status-text');
+    const btnLogin = document.getElementById('btn-oauth-login');
+    const btnLogout = document.getElementById('btn-oauth-logout');
+
+    if (!statusText || !btnLogin) return;
+
+    try {
+        const response = await fetch('/api/oauth/status');
+        const data = await response.json();
+        
+        if (data.configured) {
+            if (data.authorized) {
+                statusText.innerText = '✅ Autenticado e Pronto!';
+                statusText.style.color = 'var(--success)';
+                btnLogin.style.display = 'none';
+                if (btnLogout) btnLogout.style.display = 'flex';
+            } else {
+                statusText.innerText = '⚠ Requer Login';
+                statusText.style.color = 'var(--warning)';
+                btnLogin.style.display = 'flex';
+                if (btnLogout) btnLogout.style.display = 'none';
+            }
+        } else {
+            statusText.innerText = '❌ Não configurado (Faça upload do JSON) ';
+            statusText.style.color = '#ff4444';
+            btnLogin.style.display = 'none';
+            if (btnLogout) btnLogout.style.display = 'none';
+        }
+    } catch (e) {
+        console.error('Failed to check OAuth status', e);
+    }
+}
+
 
 function log(msg) {
     const logDiv = document.getElementById('status-log');
@@ -1076,10 +1327,22 @@ async function disconnectWhatsApp() {
 }
 
 function renderMonthlyEvents(eventsData) {
+    statusCheckQueue = []; // Limpa a fila antes de renderizar tudo novamente
+    
+    // Check Date Filter
+    const filterReset = document.getElementById('calendar-filter-reset');
+    if (selectedDateFilter) {
+        if (filterReset) filterReset.style.display = 'block';
+    } else {
+        if (filterReset) filterReset.style.display = 'none';
+    }
+
     const cols = {
         todo: document.getElementById('cards-todo'),
         doing: document.getElementById('cards-doing'),
-        done: document.getElementById('cards-done')
+        done: document.getElementById('cards-done'),
+        canceled: document.getElementById('cards-canceled'),
+        postponed: document.getElementById('cards-postponed')
     };
     if (!cols.todo) return;
 
@@ -1087,28 +1350,103 @@ function renderMonthlyEvents(eventsData) {
     Object.values(cols).forEach(c => c.innerHTML = '');
 
     const now = new Date();
-    // Simplified: show all events that were fetched (already limited to 60 days by the backend)
-    const monthlyEvents = eventsData;
+    // Normalize "now" to midnight for "today" comparison
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-    const googleColorNames = {
-        "1": "Lavanda", "2": "Sálvia", "3": "Uva", "4": "Flamingo",
-        "5": "Banana", "6": "Tangerina", "7": "Pavão", "8": "Grafite",
-        "9": "Mirtilo", "10": "Manjericão", "11": "Tomate"
-    };
+    // CHRONOLOGICAL SORT
+    const sortedEvents = [...eventsData].sort((a, b) => {
+        const da = parseGoogleDate(a.start);
+        const db = parseGoogleDate(b.start);
+        return (da || 0) - (db || 0);
+    });
 
-    monthlyEvents.forEach(event => {
+    sortedEvents.forEach(event => {
         const title = event.summary || 'Sem título';
-        const startRaw = event.start.dateTime || event.start.date || event.start;
-        const isAllDay = typeof startRaw === 'string' && startRaw.length === 10;
-        const dateObj = new Date(startRaw);
+        const dateObj = parseGoogleDate(event.start);
+        const endObj = parseGoogleDate(event.end || event.start);
+        
+        // Se cancelado ou adiado, não bloqueamos por falta de data
+        const isCanceledBase = (event.summary || '').toLowerCase().includes('cancelado') || (event.description || '').toLowerCase().includes('[canceled]') || (event.local_status === 'canceled');
+        const isPostponedBase = (event.summary || '').toLowerCase().includes('adiado') || (event.description || '').toLowerCase().includes('[postponed]') || (event.local_status === 'postponed');
+
+        if (!isCanceledBase && !isPostponedBase && (!dateObj || !endObj)) return;
+
+        const isAllDay = (typeof (event.start.date || event.start) === 'string' && (event.start.date || event.start).length === 10);
+        
+        // Normalize for "Same Day" comparison
+        const eventDate = new Date(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate());
+        const eventEndDate = new Date(endObj.getFullYear(), endObj.getMonth(), endObj.getDate());
 
         // Determine Column
-        let col = 'todo';
+        let col = 'todo'; 
         const desc = event.description || '';
-        if (desc.includes('[COLUNA:doing]')) col = 'doing';
-        else if (desc.includes('[COLUNA:done]')) col = 'done';
-        else if (event.extendedProperties?.private?.COLUNA) col = event.extendedProperties.private.COLUNA;
+        const lowerTitle = title.toLowerCase();
+        const lowerDesc = desc.toLowerCase();
 
+        // High priority status detection (more robust regex)
+        const isCanceled = /\[(CANCELAD[OA])\]/i.test(title) || /\[(CANCELED)\]/i.test(desc) || /\[COLUNA:canceled\]/i.test(desc) || (event.local_status === 'canceled');
+        const isPostponed = /\[(ADIAD[OA])\]/i.test(title) || /\[(REMARCAD[OA])\]/i.test(title) || /\[(POSTPONED)\]/i.test(desc) || /\[COLUNA:postponed\]/i.test(desc) || (event.local_status === 'postponed');
+        const isAlreadyDone = /\[(CONCLUÍD[OA])\]/i.test(title) || /\[(DONE)\]/i.test(desc) || /\[COLUNA:done\]/i.test(desc) || (event.local_status === 'done');
+
+        if (isAlreadyDone) {
+            col = 'done';
+        }
+        else if (isCanceled) {
+            col = 'canceled';
+        }
+        else if (isPostponed) {
+            col = 'postponed';
+        }
+        else if (desc.includes('[COLUNA:todo]')) {
+            col = 'todo';
+        }
+        else if (desc.includes('[COLUNA:doing]')) {
+            col = 'doing';
+        }
+        else if (event.extendedProperties?.private?.COLUNA) {
+            col = event.extendedProperties.private.COLUNA;
+        }
+        else if (!dateObj) {
+             // Fallback para eventos sem data que não estão em colunas específicas
+             col = 'todo';
+        }
+        else {
+            // Check if it's "Today"
+            const startsToday = isSameDay(eventDate, today);
+            
+            // Adjust end date check for all-day events
+            let endsToday = isSameDay(eventEndDate, today);
+            let actualEnd = eventEndDate;
+            if (isAllDay) {
+                // If it's all day, end date might be the next day at midnight
+                actualEnd = new Date(endObj.getTime() - 1);
+                endsToday = isSameDay(actualEnd, today);
+            }
+
+            const occursToday = (eventDate <= today && actualEnd >= today);
+            
+            // Regra principal solicitada:
+            // "atividades dentro do kanban devem ser movidas segundo sua data"
+            // "hoje em hoje"
+            // "comcluidos em comcluidos se a data tiver passado"
+            // "ou crie um modal perguntando se a atividade foi concluida cancelada ou adiada"
+
+            // Data atual com hora pra verificar eventos do próprio dia que já acabaram no relógio
+            let eventRealEnd = endObj;
+            if (isAllDay) eventRealEnd = new Date(endObj.getFullYear(), endObj.getMonth(), endObj.getDate(), 23, 59, 59);
+
+            if (eventRealEnd < now) {
+                col = 'done_pending_status'; // Marcador temporário para pedir revisão
+            } else if (startsToday || endsToday || occursToday) {
+                col = 'doing';
+            } else {
+                col = 'todo';
+            }
+        }
+        
+        console.log(`[Kanban v3.8] "${title}" | Start: ${dateObj.toLocaleDateString()} | Col: ${col}`);
+
+        
         // Card Color (Label)
         const hasColor = event.colorId && googleColorMap[event.colorId];
         const labelColor = hasColor ? googleColorMap[event.colorId] : 'transparent';
@@ -1136,22 +1474,44 @@ function renderMonthlyEvents(eventsData) {
             clDone += items.filter(i => i.endsWith(':true')).length;
         }
 
+        // Build date/time display
+        const timeLabel = !dateObj 
+            ? 'Sem data'
+            : (isAllDay 
+                ? 'Dia todo' 
+                : dateObj.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }));
+
+        // Calendar name (short)
+        const calName = (window.availableCalendars.find(c => c.id === event.calendarId)?.summary || '').split(' ')[0];
+
         card.innerHTML = `
-            <div class="card-label" style="background: ${labelColor}"></div>
-            <div class="card-title">${title}</div>
-            <div class="card-badges">
-                <div class="badge">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
-                    ${isAllDay ? 'Dia Todo' : dateObj.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+            <div class="card-label" style="background: ${labelColor}; ${labelColor === 'transparent' ? 'display:none' : ''}"></div>
+            <div class="card-body">
+                <div class="card-title">${title}</div>
+                <div class="card-badges">
+                    <div class="badge">
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                        ${timeLabel}
+                    </div>
+                    ${calName ? `<div class="badge">${calName}</div>` : ''}
+                    ${clTotal > 0 ? `<div class="badge ${clDone === clTotal ? 'badge-success' : ''}">
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="m9 12 2 2 4-4"/></svg>
+                        ${clDone}/${clTotal}
+                    </div>` : ''}
+                    ${pCount > 0 ? `<div class="badge">
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                        ${pCount}
+                    </div>` : ''}
+
+                    ${desc.includes('[ATTACH:') ? `<div class="badge">
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+                        Anexo
+                    </div>` : ''}
                 </div>
-                ${clTotal > 0 ? `<div class="badge ${clDone === clTotal ? 'badge-success' : ''}"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"></path><path d="m9 12 2 2 4-4"></path></svg>${clDone}/${clTotal}</div>` : ''}
-                ${pCount > 0 ? `<div class="badge"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>${pCount}</div>` : ''}
-                ${desc.includes('[CALL:') ? `<div class="badge" style="background: rgba(234, 179, 8, 0.2);"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></svg></div>` : ''}
-                ${desc.includes('[ATTACH:') ? `<div class="badge"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg></div>` : ''}
-            </div>
-            <div class="card-footer-avatars">
-                <div class="avatar-mini" title="${event.organizer?.email || 'Organizador'}">${(event.organizer?.email || 'A').charAt(0).toUpperCase()}</div>
-                ${pCount > 1 ? `<div class="avatar-mini">+${pCount - 1}</div>` : ''}
+                <div class="card-footer-avatars">
+                    <div class="avatar-mini" title="${event.organizer?.email || 'Organizador'}">${(event.organizer?.email || 'A').charAt(0).toUpperCase()}</div>
+                    ${pCount > 1 ? `<div class="avatar-mini">+${pCount - 1}</div>` : ''}
+                </div>
             </div>
         `;
 
@@ -1160,11 +1520,171 @@ function renderMonthlyEvents(eventsData) {
                 openEditModalFromEvent(event);
             }
         };
+        
+        // console.log(`[Status Debug] Evento: ${title} | isCanceled: ${isCanceled} | isPostponed: ${isPostponed} | isAlreadyDone: ${isAlreadyDone}`);
 
-        cols[col].appendChild(card);
+        if (col === 'done_pending_status') {
+            if (isCanceled || isPostponed || isAlreadyDone) {
+                // Já tem um status definido, apenas vai pro conlcuído
+                cols['done'].appendChild(card);
+            } else {
+                // Mostrar em "todo" mas enfileirar para o modal
+                cols['todo'].appendChild(card);
+                queueStatusCheck(event);
+            }
+        } else {
+            cols[col].appendChild(card);
+        }
     });
 
     updateKanbanCounters();
+    processStatusQueue();
+}
+
+let statusCheckQueue = [];
+let isStatusModalOpen = false;
+
+function queueStatusCheck(event) {
+    const currentOpenId = document.getElementById('status-modal-event-id') ? document.getElementById('status-modal-event-id').value : null;
+    if (isStatusModalOpen && currentOpenId === event.id) return;
+    
+    if (!statusCheckQueue.find(e => e.id === event.id)) {
+        statusCheckQueue.push(event);
+    }
+}
+
+function processStatusQueue() {
+    if (isStatusModalOpen || statusCheckQueue.length === 0) return;
+    
+    // Only show if we're on the dashboard
+    if (!document.getElementById('eventos').classList.contains('active')) return;
+
+    const event = statusCheckQueue.shift();
+    isStatusModalOpen = true;
+
+    const modal = document.getElementById('status-modal');
+    if (modal) {
+        document.getElementById('status-modal-event-name').textContent = event.summary || "Sem Título";
+        document.getElementById('status-modal-event-id').value = event.id;
+        modal.style.display = 'flex';
+    }
+}
+
+async function answerStatusModal(statusAction) {
+    const eventId = document.getElementById('status-modal-event-id').value;
+    if (!eventId) return;
+
+    // Localizamo o evento real
+    const event = window.cachedEvents.find(e => e.id === eventId);
+    if (!event) {
+        document.getElementById('status-modal').style.display = 'none';
+        isStatusModalOpen = false;
+        processStatusQueue();
+        return;
+    }
+
+    // Disable buttons to avoid double clicks
+    const modal = document.getElementById('status-modal');
+    const buttons = modal.querySelectorAll('button');
+    buttons.forEach(b => b.disabled = true);
+
+    try {
+        let newTitle = event.summary || "Sem Título";
+        let newDesc = event.description || "";
+        let newStart = event.start;
+        let newEnd = event.end || event.start;
+        
+        // 1. Limpar tags velhas pra não duplicar
+        newTitle = newTitle.replace(/^\s*\[(CANCELAD[OA]|ADIAD[OA]|CONCLUÍD[OA]|REMARCAD[OA])\]\s*/i, '');
+        newDesc = newDesc.replace(/\[COLUNA:.+?\]/g, '').replace(/\[(CANCELED|POSTPONED|DONE)\]/g, '').trim();
+
+        if (statusAction === 'done') {
+            newTitle = `[CONCLUÍDO] ${newTitle}`;
+            newDesc = `${newDesc}\n[COLUNA:done]\n[DONE]`.trim();
+        } 
+        else if (statusAction === 'canceled') {
+            newTitle = `[CANCELADO] ${newTitle}`;
+            newDesc = `${newDesc}\n[COLUNA:canceled]\n[CANCELED]`.trim();
+        } 
+        else if (statusAction === 'postponed_today') {
+            newTitle = `[ADIADO] ${newTitle}`;
+            newDesc = `${newDesc}\n[COLUNA:doing]\n[POSTPONED]`.trim();
+            // Muda para o dia de hoje (agendado)
+            const now = new Date();
+            const y = now.getFullYear();
+            const m = String(now.getMonth() + 1).padStart(2, '0');
+            const d = String(now.getDate()).padStart(2, '0');
+            const todayStr = `${y}-${m}-${d}`;
+            
+            if (newStart.dateTime) {
+                const timeStr = newStart.dateTime.substring(11, 19);
+                const offset = newStart.dateTime.substring(19);
+                newStart.dateTime = `${todayStr}T${timeStr}${offset}`;
+                if (newEnd && newEnd.dateTime) {
+                    const timeStrEnd = newEnd.dateTime.substring(11, 19);
+                    const offsetEnd = newEnd.dateTime.substring(19);
+                    newEnd.dateTime = `${todayStr}T${timeStrEnd}${offsetEnd}`;
+                }
+            } else if (newStart.date) {
+                newStart.date = todayStr;
+                if (newEnd && newEnd.date) {
+                    const tmr = new Date(now);
+                    tmr.setDate(tmr.getDate() + 1);
+                    newEnd.date = `${tmr.getFullYear()}-${String(tmr.getMonth() + 1).padStart(2, '0')}-${String(tmr.getDate()).padStart(2, '0')}`;
+                }
+            }
+        } 
+        else if (statusAction === 'postponed') {
+            newTitle = `[ADIADO] ${newTitle}`;
+            newDesc = `${newDesc}\n[COLUNA:postponed]\n[POSTPONED]`.trim();
+            
+            if (confirm("Deseja definir uma nova data agora? Se cancelar, o evento ficará na coluna 'ADIADO' sem data fixa.")) {
+                // Ao abrir o modal de edição, fechamos o de status e paramos o loop
+                modal.style.display = 'none';
+                openEditModalFromEvent(event);
+                document.getElementById('event-title').value = newTitle;
+                document.getElementById('event-description').value = newDesc;
+                
+                // Marcamos como finalizado no modal de status ANTES de retornar
+                isStatusModalOpen = false;
+                return;
+            } else {
+                newStart = { date: "2099-12-31" }; 
+                newEnd = { date: "2100-01-01" };
+            }
+        }
+
+        const payload = {
+            ...event,
+            summary: newTitle,
+            description: newDesc,
+            start: newStart,
+            end: newEnd,
+            local_status: (statusAction === 'done') ? 'done' : 
+                          (statusAction === 'canceled') ? 'canceled' : 
+                          (statusAction.startsWith('postponed')) ? 'postponed' : null
+        };
+
+        const res = await fetch(`/v1/events/${eventId}?calendarId=${encodeURIComponent(event.calendarId || 'primary')}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        
+        if (res.ok) {
+            const updatedEvent = await res.json();
+            const idx = window.cachedEvents.findIndex(e => e.id === eventId);
+            if (idx !== -1) window.cachedEvents[idx] = updatedEvent;
+        }
+
+    } catch (e) {
+        console.error('Falha ao atualizar status via modal:', e);
+    } finally {
+        modal.style.display = 'none';
+        isStatusModalOpen = false;
+        buttons.forEach(b => b.disabled = false);
+        filterAndRenderEvents(); 
+    }
 }
 
 function openEditModalFromEvent(event) {
@@ -1226,9 +1746,13 @@ function openEditModalFromEvent(event) {
 }
 
 function updateKanbanCounters() {
-    ['todo', 'doing', 'done'].forEach(col => {
-        const count = document.getElementById(`cards-${col}`).children.length;
-        document.getElementById(`count-${col}`).innerText = count;
+    ['todo', 'doing', 'done', 'canceled', 'postponed'].forEach(col => {
+        const cardsEl = document.getElementById(`cards-${col}`);
+        const countEl = document.getElementById(`count-${col}`);
+        if (cardsEl && countEl) {
+            const count = cardsEl.children.length;
+            countEl.innerText = count;
+        }
     });
 }
 
@@ -1354,7 +1878,7 @@ function addParticipantRow(name = "", wa = "") {
                 oninput="filterContactDropdown(this)"
                 onblur="setTimeout(()=>closeContactDropdown(this),200)"
                 onfocus="filterContactDropdown(this)">
-            <div class="contact-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:9999;max-height:180px;overflow-y:auto;background:#1e293b;border:1px solid #334155;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.4);"></div>
+            <div class="contact-dropdown" style="display:none;"></div>
         </div>
         <input type="text" placeholder="WhatsApp (DDD+Número)" class="p-wa meta-lite-input" value="${wa}" style="flex:1;">
         <button type="button" onclick="pinAsFavorite(this)" class="btn-pin-fav" title="Fixar nos Favoritos"><i data-lucide="star" style="width:16px;height:16px;"></i></button>
@@ -1391,19 +1915,44 @@ function filterContactDropdown(input) {
         const cname = c.name || c.notify || 'Sem Nome';
         const number = c.id.split('@')[0];
         return `<div class="contact-dropdown-item" 
-            style="padding:10px 14px;cursor:pointer;display:flex;align-items:center;gap:10px;border-bottom:1px solid #273044;"
             onmousedown="selectContactFromDropdown(event, '${cname.replace(/'/g, "\\'")}', '${number}')"
             onmouseenter="this.style.background='#334155'"
             onmouseleave="this.style.background=''">
-            <div style="width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,#25d366,#128c7e);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;color:#fff;flex-shrink:0;">${(cname[0] || '?').toUpperCase()}</div>
-            <div>
-                <div style="font-weight:600;font-size:13px;color:#e2e8f0;">${cname}</div>
-                <div style="font-size:11px;color:#64748b;">+${number}</div>
+            <div class="contact-dd-avatar">${(cname[0] || '?').toUpperCase()}</div>
+            <div class="contact-dd-info">
+                <div class="contact-dd-name">${cname}</div>
+                <div class="contact-dd-num">+${number}</div>
             </div>
         </div>`;
     }).join('');
 
-    dropdown.style.display = 'block';
+    // ---- Position: fixed so it escapes any overflow:hidden container ----
+    const rect = input.getBoundingClientRect();
+    const dropHeight = Math.min(200, matches.length * 36); // Approx height of items
+    const spaceBelow = window.innerHeight - rect.bottom;
+    
+    // Default open downwards setting
+    let topPos = rect.bottom + 2;
+    
+    // Open upwards if near bottom of screen and there is more room above
+    if (spaceBelow < dropHeight && rect.top > dropHeight) {
+        topPos = rect.top - dropHeight - 2;
+    }
+
+    Object.assign(dropdown.style, {
+        display:      'block',
+        position:     'fixed',
+        top:          topPos + 'px',
+        left:         rect.left + 'px',
+        width:        rect.width + 'px',
+        maxHeight:    '200px',
+        overflowY:    'auto',
+        background:   '#162032',
+        border:       '1px solid rgba(255,255,255,0.08)',
+        borderRadius: '8px',
+        boxShadow:    '0 6px 20px rgba(0,0,0,0.45)',
+        zIndex:       '99999'
+    });
 }
 
 function selectContactFromDropdown(event, name, number) {
@@ -1450,7 +1999,7 @@ function renderQuickContactsUI() {
                 imgHtml = `<img src="${fav.photo}" alt="${fav.name}">`;
             } else {
                 const initials = fav.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
-                imgHtml = `<div style="width:100%; height:100%; border-radius:50%; display:flex; align-items:center; justify-content:center; background:#334155;"><span>${initials || '??'}</span></div>`;
+                imgHtml = `<div style="width:100%; height:100%; border-radius:50%; display:flex; align-items:center; justify-content:center; background:#334155; overflow:hidden;"><span>${initials || '??'}</span></div>`;
             }
 
             btn.innerHTML = `
@@ -1458,6 +2007,9 @@ function renderQuickContactsUI() {
                 <div class="contact-hover-card">
                     <img src="${largePhotoUrl}" alt="${fav.name}">
                     <span>${fav.name}</span>
+                    <button onclick="removeFavorite(${i}, event)" style="margin-top:8px; background:rgba(239,68,68,0.2); color:#ef4444; border:1px solid rgba(239,68,68,0.3); padding:4px; border-radius:4px; cursor:pointer; font-size:0.7rem; width:100%; transition:all 0.2s;">
+                        Remover
+                    </button>
                 </div>
             `;
             btn.classList.add('filled');
@@ -1471,6 +2023,24 @@ function renderQuickContactsUI() {
     if (window.lucide) lucide.createIcons();
 }
 
+async function saveFavoriteFromData(idx, name, wa) {
+    let photo = null;
+    try {
+        const res = await fetch(`/v1/whatsapp/photo/${wa}`);
+        if (res.ok) {
+            const data = await res.json();
+            if (data && data.url) photo = data.url;
+        }
+    } catch (e) {
+        console.error('Falha ao obter foto:', e);
+    }
+
+    quickFavorites[idx] = { name, wa, photo };
+    localStorage.setItem('wa_quick_favorites', JSON.stringify(quickFavorites));
+    renderQuickContactsUI();
+    showToast(`Salvo no Favorito ${idx + 1}`, 'success');
+}
+
 async function pinAsFavorite(btn) {
     const row = btn.closest('.p-row');
     const name = row.querySelector('.p-name').value;
@@ -1481,33 +2051,43 @@ async function pinAsFavorite(btn) {
         return;
     }
 
-    // Modal/Prompt to select slot
-    const slot = prompt("Em qual posição (1 a 6) deseja salvar este contato?", "1");
-    if (!slot) return;
-    const idx = parseInt(slot) - 1;
+    // Find first empty slot
+    const emptyIdx = quickFavorites.findIndex(f => !f);
+    
+    if (emptyIdx !== -1) {
+        await saveFavoriteFromData(emptyIdx, name, wa);
+    } else {
+        showToast('Favoritos cheios. Remova um passando o mouse sobre ele e clicando no "Remover".', 'error');
+    }
+}
 
-    if (idx >= 0 && idx < 6) {
-        let photo = null;
-        try {
-            const res = await fetch(`/v1/whatsapp/photo/${wa}`);
-            if (res.ok) {
-                const data = await res.json();
-                if (data && data.url) photo = data.url;
-            }
-        } catch (e) {
-            console.error('Falha ao obter foto:', e);
-        }
-
-        quickFavorites[idx] = { name, wa, photo };
+function removeFavorite(idx, event) {
+    event.stopPropagation();
+    if(confirm('Remover este contato dos favoritos?')) {
+        quickFavorites[idx] = null;
         localStorage.setItem('wa_quick_favorites', JSON.stringify(quickFavorites));
         renderQuickContactsUI();
-        showToast(`Salvo no Favorito ${idx + 1}`, 'success');
+        showToast('Favorito removido.', 'info');
     }
 }
 
 function addFromFavorite(idx) {
     const fav = quickFavorites[idx];
     if (!fav) {
+        // If slot is empty, check if there's an active participant row filled out and ask to save it
+        const container = document.getElementById('participants-container');
+        const rows = container ? Array.from(container.querySelectorAll('.p-row')) : [];
+        const filledRow = rows.find(r => r.querySelector('.p-name').value.trim() && r.querySelector('.p-wa').value.trim());
+
+        if (filledRow) {
+            const name = filledRow.querySelector('.p-name').value.trim();
+            const wa = filledRow.querySelector('.p-wa').value.trim();
+            if (confirm(`Deseja salvar "${name}" neste espaço de Favorito?`)) {
+                saveFavoriteFromData(idx, name, wa);
+                return;
+            }
+        }
+        
         showToast(`Slot ${idx + 1} está vazio. Adicione um contato e use a estrela para salvar.`, 'info');
         return;
     }
@@ -1550,9 +2130,19 @@ function handleContactInput(input) {
 }
 
 let loadingContacts = false;
-async function loadContacts(isManual = true) {
+async function loadContacts(isManual = true, retryCount = 0) {
     if (loadingContacts) return;
     loadingContacts = true;
+
+    const btn = document.getElementById('btn-sync-contacts');
+    const badge = document.getElementById('contact-count-badge');
+    const oldBtnContent = btn ? btn.innerHTML : '';
+
+    if (btn) {
+        btn.innerHTML = '⏳ Buscando contatos...';
+        btn.disabled = true;
+    }
+
     try {
         console.log('[Frontend] Carregando contatos...');
         const response = await fetch('/v1/whatsapp/contacts');
@@ -1587,13 +2177,43 @@ async function loadContacts(isManual = true) {
             // leave as-is — no overwrite
         });
 
+        if (allContacts.length === 0 && retryCount < 4) {
+            // WhatsApp ainda sincronizando — tenta de novo em instantes
+            const waitSec = 5;
+            loadingContacts = false;
+            if (btn) {
+                let countdown = waitSec;
+                btn.innerHTML = `⌛ Aguardando sincronização... (${countdown}s)`;
+                const timer = setInterval(() => {
+                    countdown--;
+                    if (btn) btn.innerHTML = `⌛ Aguardando sincronização... (${countdown}s)`;
+                }, 1000);
+                setTimeout(() => {
+                    clearInterval(timer);
+                    btn.disabled = false;
+                    loadContacts(isManual, retryCount + 1);
+                }, waitSec * 1000);
+            }
+            return;
+        }
+
         if (isManual) showToast(`✅ ${allContacts.length} contatos sincronizados!`, 'success');
         console.log(`[Frontend] ${allContacts.length} contatos carregados.`);
+
+        // Update contact count badge on the sync button
+        if (badge) {
+            badge.textContent = allContacts.length + ' contatos';
+            badge.style.display = 'inline';
+        }
     } catch (e) {
         console.error('Erro ao carregar contatos:', e);
         if (isManual) showToast("Falha ao sincronizar: " + e.message, 'error');
     } finally {
         loadingContacts = false;
+        if (btn) {
+            btn.innerHTML = oldBtnContent || `🔄 Atualizar Contatos <span id="contact-count-badge" style="background: rgba(0,0,0,0.3); padding: 2px 8px; border-radius: 10px; font-size: 0.8rem; margin-left: 5px;">${allContacts.length > 0 ? allContacts.length + ' contatos' : ''}</span>`;
+            btn.disabled = false;
+        }
     }
 }
 
@@ -1662,14 +2282,18 @@ async function drop(ev, colName) {
     // Persist to Google Calendar
     const eventId = card.id.replace('card-', '');
     try {
-        // Fetch original event to get current desc
-        const res = await fetch(`/v1/events`);
-        const events = await res.json();
-        const event = events.find(e => e.id === eventId);
+        // Fetch original event from cache
+        const event = window.cachedEvents.find(e => e.id === eventId);
         if (!event) return;
 
         let cleanDesc = (event.description || '').replace(/\[COLUNA:.+?\]/g, '').trim();
         const newDesc = `${cleanDesc}\n[COLUNA:${colName}]`.trim();
+        
+        // Se arrastado para colunas de status final, marcamos explicitamente
+        let statusToSet = null;
+        if (colName === 'done') statusToSet = 'done';
+        if (colName === 'canceled') statusToSet = 'canceled';
+        if (colName === 'postponed') statusToSet = 'postponed';
 
         await fetch(`/v1/events/${eventId}`, {
             method: 'PUT',
@@ -1677,11 +2301,12 @@ async function drop(ev, colName) {
             body: JSON.stringify({
                 ...event,
                 description: newDesc,
-                start: event.start.dateTime || event.start.date,
-                end: event.end.dateTime || event.end.date
+                local_status: statusToSet || event.local_status,
+                start: event.start.dateTime || event.start.date || event.start,
+                end: event.end ? (event.end.dateTime || event.end.date || event.end) : event.start
             })
         });
-        console.log(`Event ${eventId} moved to ${colName}`);
+        console.log(`Event ${eventId} moved to ${colName} (Status: ${statusToSet})`);
     } catch (e) {
         console.error('Failed to persist column move:', e);
     }
@@ -1696,11 +2321,15 @@ function parseEventTagsIntoModal(event) {
     const jidSelect = document.getElementById('event-group-jid');
     if (jidSelect) jidSelect.value = '';
 
-    // Parse Call
-    if (fullDesc.includes('[CALL:')) {
-        const callMatch = fullDesc.match(/\[CALL:(\d+)\]/);
-        if (callMatch) document.getElementById('event-call-reminder').value = callMatch[1];
-        fullDesc = fullDesc.replace(/\[CALL:\d+\]/, '');
+
+    // Parse Status from Summary
+    const statusSelect = document.getElementById('event-status');
+    const title = (event.summary || "").toUpperCase();
+    if (statusSelect) {
+        if (title.includes('[CONCLUÍDO]')) statusSelect.value = 'done';
+        else if (title.includes('[CANCELADO]')) statusSelect.value = 'canceled';
+        else if (title.includes('[ADIADO]')) statusSelect.value = 'postponed';
+        else statusSelect.value = 'todo';
     }
 
     // Parse Group Tags & Column
@@ -1776,8 +2405,6 @@ function addChecklistUI(title = "Checklist", items = []) {
     container.innerHTML = `
         <div class="checklist-header">
             <div class="checklist-title"><span>✅</span> ${title}</div>
-            <button class="btn-ghost-sm" onclick="this.closest('.checklist-container').remove()">Excluir</button>
-        </div>
         <div class="checklist-progress-bar">
             <div class="checklist-progress-fill"></div>
         </div>
@@ -2004,15 +2631,17 @@ function renderChecklistsAndAttachments(event) {
     }
 }
 
+// --- Attachment Logic ---
+
 // Initial calls
 loadCalendars().then(() => {
     initColorPicker();
     listAgendas();
-    listCredentials();
-    loadNotificationSettings();
     updateStatus();
+    checkOAuthStatus();
     loadContacts(false);
     fetchEvents();
+    initSidebarCalendar();
     setInterval(updateStatus, 10000); // 10s is plenty
     setInterval(fetchEvents, 30000); // Cards refresh every 30s
     renderQuickContactsUI();
@@ -2063,3 +2692,310 @@ function applyTemplateByType() {
         selectColor("10"); // Basil for Activities
     }
 }
+// --- Nova Agenda Modal ---
+
+function openCreateCalendarModal() {
+    document.getElementById('calendar-summary').value = '';
+    document.getElementById('calendar-description').value = '';
+    document.getElementById('calendar-modal').style.display = 'flex';
+}
+
+function closeCreateCalendarModal() {
+    document.getElementById('calendar-modal').style.display = 'none';
+}
+
+async function saveCalendar() {
+    const summary = document.getElementById('calendar-summary').value;
+    const description = document.getElementById('calendar-description').value;
+
+    if (!summary.trim()) {
+        alert('Por favor, informe um nome para a agenda.');
+        return;
+    }
+
+    try {
+        const res = await fetch('/v1/events/calendars', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ summary, description })
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+
+        alert('Agenda criada com sucesso!');
+        closeCreateCalendarModal();
+        
+        // Recarregar os filtros de agendas e a página de eventos
+        await loadCalendars();
+        listAgendas(); // Se estiver na tela de minhs agendas
+    } catch (e) {
+        alert('Erro ao criar agenda: ' + e.message);
+    }
+}
+
+function initSidebarCalendar() {
+    const calendarEl = document.getElementById('sidebar-calendar');
+    if (!calendarEl || !window.FullCalendar) return;
+
+    sidebarCalendar = new FullCalendar.Calendar(calendarEl, {
+        initialView: 'dayGridMonth',
+        locale: 'pt-br',
+        headerToolbar: false, // Hide header to match minimalist look
+        dayHeaderFormat: { weekday: 'narrow' }, // D, S, T, Q, Q, S, S
+        height: 'auto',
+        selectable: true,
+        unselectAuto: false,
+        dateClick: function(info) {
+            if (selectedDateFilter === info.dateStr) {
+                clearDateFilter();
+            } else {
+                selectedDateFilter = info.dateStr;
+                
+                // Styling handled by CSS classes for selected date
+                document.querySelectorAll('#sidebar-calendar .fc-daygrid-day').forEach(el => {
+                    el.classList.remove('selected-day');
+                });
+                info.dayEl.classList.add('selected-day');
+                
+                filterAndRenderEvents();
+            }
+        },
+        // Highlight selected date on first render if exists
+        dayCellDidMount: function(arg) {
+            if (selectedDateFilter && arg.dateStr === selectedDateFilter) {
+                arg.el.classList.add('selected-day');
+            }
+        }
+    });
+
+    sidebarCalendar.render();
+    updateCalendarHeader();
+}
+
+function updateCalendarHeader() {
+    if (!sidebarCalendar) return;
+    const date = sidebarCalendar.getDate();
+    const monthName = date.toLocaleString('pt-br', { month: 'long' });
+    const year = date.getFullYear();
+    const label = document.getElementById('cal-month-name');
+    if (label) label.textContent = `${monthName} de ${year}`;
+}
+
+function prevMonth() {
+    if (sidebarCalendar) {
+        sidebarCalendar.prev();
+        updateCalendarHeader();
+    }
+}
+
+function nextMonth() {
+    if (sidebarCalendar) {
+        sidebarCalendar.next();
+        updateCalendarHeader();
+    }
+}
+
+function goToday() {
+    if (sidebarCalendar) {
+        sidebarCalendar.today();
+        updateCalendarHeader();
+    }
+}
+
+function clearDateFilter() {
+    selectedDateFilter = null;
+    const cells = document.querySelectorAll('#sidebar-calendar .fc-daygrid-day');
+    cells.forEach(c => {
+        c.style.background = '';
+        c.classList.remove('selected-day');
+    });
+    filterAndRenderEvents();
+}
+
+// --- Spell Checker Logic ---
+
+class SpellChecker {
+    constructor(dictionary = []) {
+        this.dict = new Set(dictionary);
+        this.suggestionMenu = null;
+        this.ignoredWords = new Set();
+        this.activeInput = null;
+        this.activeRange = null;
+        this.initSuggestionsMenu();
+    }
+
+    initSuggestionsMenu() {
+        this.suggestionMenu = document.createElement('div');
+        this.suggestionMenu.className = 'spell-suggestions-menu';
+        document.body.appendChild(this.suggestionMenu);
+        
+        document.addEventListener('click', (e) => {
+            if (!this.suggestionMenu.contains(e.target) && !e.target.classList.contains('spell-error')) {
+                this.suggestionMenu.style.display = 'none';
+            }
+        });
+    }
+
+    checkWord(word) {
+        const clean = word.toLowerCase().replace(/[.,!?;:()]/g, '');
+        if (clean.length <= 1) return true;
+        if (this.dict.has(clean) || this.ignoredWords.has(clean) || !isNaN(clean)) return true;
+        return false;
+    }
+
+    getLevenshteinDistance(s1, s2) {
+        const m = s1.length, n = s2.length;
+        const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+        for (let i = 0; i <= m; i++) dp[i][0] = i;
+        for (let j = 0; j <= n; j++) dp[0][j] = j;
+        for (let i = 1; i <= m; i++) {
+            for (let j = 1; j <= n; j++) {
+                const cost = s1[i - 1] === s2[j - 1] ? 0 : 1;
+                dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost);
+            }
+        }
+        return dp[m][n];
+    }
+
+    getSuggestions(word) {
+        const clean = word.toLowerCase();
+        let suggestions = [];
+        for (const dictWord of this.dict) {
+            const distance = this.getLevenshteinDistance(clean, dictWord);
+            if (distance <= 2) {
+                suggestions.push({ word: dictWord, dist: distance });
+            }
+            if (suggestions.length > 50) break; // Performance guard
+        }
+        return suggestions.sort((a, b) => a.dist - b.dist).slice(0, 5).map(s => s.word);
+    }
+
+    highlightText(text) {
+        const words = text.split(/(\s+)/);
+        return words.map(w => {
+            if (/\s+/.test(w)) return w;
+            const clean = w.replace(/[.,!?;:()]/g, '');
+            if (clean && !this.checkWord(clean)) {
+                return `<span class="spell-error" data-word="${clean}">${w}</span>`;
+            }
+            return w;
+        }).join('');
+    }
+
+    showSuggestions(e, input, overlay) {
+        const word = e.target.dataset.word;
+        if (!word) return;
+
+        const suggestions = this.getSuggestions(word);
+        this.suggestionMenu.innerHTML = '';
+        
+        suggestions.forEach(s => {
+            const item = document.createElement('div');
+            item.className = 'spell-suggestion-item';
+            item.textContent = s;
+            item.onclick = () => this.replaceWord(input, word, s);
+            this.suggestionMenu.appendChild(item);
+        });
+
+        const ignore = document.createElement('div');
+        ignore.className = 'spell-suggestion-item ignore';
+        ignore.textContent = 'Ignorar';
+        ignore.onclick = () => {
+            this.ignoredWords.add(word.toLowerCase());
+            this.updateOverlay(input, overlay);
+            this.suggestionMenu.style.display = 'none';
+        };
+        this.suggestionMenu.appendChild(ignore);
+
+        const rect = e.target.getBoundingClientRect();
+        this.suggestionMenu.style.top = `${rect.bottom + window.scrollY + 5}px`;
+        this.suggestionMenu.style.left = `${rect.left + window.scrollX}px`;
+        this.suggestionMenu.style.display = 'flex';
+    }
+
+    replaceWord(input, oldWord, newWord) {
+        const val = input.value;
+        const regex = new RegExp(`\\b${oldWord}\\b`, 'gi');
+        input.value = val.replace(regex, newWord);
+        input.dispatchEvent(new Event('input'));
+        this.suggestionMenu.style.display = 'none';
+    }
+
+    updateOverlay(input, overlay) {
+        overlay.innerHTML = this.highlightText(input.value) + '\n'; // Add newline to help alignment
+        overlay.scrollTop = input.scrollTop;
+    }
+
+    bind(input) {
+        const container = document.createElement('div');
+        container.className = 'spell-highlighter-container';
+        input.parentNode.insertBefore(container, input);
+        
+        const overlay = document.createElement('div');
+        overlay.className = 'spell-highlighter-overlay';
+        container.appendChild(overlay);
+        container.appendChild(input);
+
+        input.addEventListener('input', () => this.updateOverlay(input, overlay));
+        input.addEventListener('scroll', () => {
+            overlay.scrollTop = input.scrollTop;
+            overlay.scrollLeft = input.scrollLeft;
+        });
+
+        overlay.addEventListener('click', (e) => {
+            if (e.target.classList.contains('spell-error')) {
+                this.showSuggestions(e, input, overlay);
+            }
+        });
+        
+        // Initial check
+        this.updateOverlay(input, overlay);
+    }
+}
+
+// Common Portuguese words seed (Top 1000 approximate)
+const ptDict = [
+    "o", "a", "os", "as", "de", "do", "da", "dos", "das", "um", "uma", "uns", "umas", "e", "é", "que", "para", "por", "em", "com",
+    "seu", "sua", "seus", "suas", "meu", "minha", "meus", "minhas", "teu", "tua", "teus", "tuas", "nosso", "nossa", "nossos", "nossas",
+    "este", "esta", "estes", "estas", "esse", "essa", "esses", "essas", "aquele", "aquela", "aqueles", "aquelas", "isso", "isto", "aquilo",
+    "eu", "tu", "ele", "ela", "nós", "vós", "eles", "elas", "você", "vocês", "ser", "estar", "ter", "haver", "fazer", "dar", "ir", "vir",
+    "poder", "saber", "querer", "dizer", "ver", "falar", "casa", "carro", "trabalho", "tempo", "dia", "noite", "bom", "boa", "grande",
+    "pequeno", "muito", "pouco", "mais", "menos", "aqui", "ali", "lá", "agora", "depois", "sempre", "nunca", "hoje", "ontem", "amanhã",
+    "evento", "agenda", "calendário", "reunião", "cliente", "projeto", "contato", "mensagem", "whatsapp", "notificação", "pendente",
+    "concluído", "cancelado", "adiado", "descrição", "título", "local", "sala", "participante", "grupo", "link", "anexo", "arquivo",
+    "foto", "vídeo", "documento", "pdf", "drive", "meet", "zoom", "skype", "equipe", "almoço", "visita", "treinamento", "viagem",
+    "palestra", "curso", "festa", "aniversário", "casamento", "feriado", "domingo", "segunda", "terça", "quarta", "quinta", "sexta",
+    "sábado", "janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro",
+    "atendimento", "suporte", "venda", "contrato", "financeiro", "pagamento", "boleto", "cartão", "nota", "fiscal", "empresa", "cnpj",
+    "cpf", "telefone", "celular", "email", "site", "dashboard", "sistema", "configuração", "perfil", "senha", "usuário", "admin",
+    "relatório", "backup", "log", "erro", "sucesso", "teste", "desenvolvimento", "programação", "código", "funcionalidade",
+    "ajuste", "correção", "melhoria", "estética", "design", "layout", "visual", "cor", "estilo", "fonte", "texto", "parágrafo",
+    "página", "aba", "botão", "ícone", "banner", "logo", "marca", "marketing", "digital", "estratégia", "planejamento", "objetivo",
+    "meta", "prazo", "entrega", "finalizado", "prioridade", "importante", "urgente", "crítico", "normal", "baixo", "alto", "médio",
+    "tarefa", "atividade", "checklist", "passo", "etapa", "fluxo", "processo", "gestão", "liderança", "colaboração", "comunicação",
+    "equipe", "membro", "pessoa", "indivíduo", "social", "comunidade", "rede", "internet", "nuvem", "nuvens", "sol", "chuva", "frio",
+    "calor", "clima", "natureza", "vida", "saúde", "bem", "mal", "verdade", "mentira", "certo", "errado", "fácil", "difícil", "novo", "velho",
+    "primeiro", "último", "próximo", "anterior", "cada", "todo", "algum", "nenhum", "qualquer", "vários", "muitos", "alguns", "outros",
+    "mesmo", "próprio", "tal", "como", "assim", "também", "ainda", "já", "até", "mesmo", "então", "pois", "embora", "contudo", "porque",
+    "porquê", "por", "que", "onde", "quando", "quem", "quanto", "qual", "quais", "quaisquer", "através", "conforme", "segundo", "durante",
+    "sob", "sobre", "entre", "perante", "atrás", "frente", "lado", "dentro", "fora", "acima", "abaixo"
+];
+
+const spellChecker = new SpellChecker(ptDict);
+
+// Bind to modal inputs when they are ready
+function initSpellChecker() {
+    const titleInput = document.getElementById('event-title');
+    const descInput = document.getElementById('event-description');
+    
+    if (titleInput) spellChecker.bind(titleInput);
+    if (descInput) spellChecker.bind(descInput);
+}
+
+// Re-initialize or check if needed
+window.addEventListener('DOMContentLoaded', () => {
+    // Wait a bit for other scripts to initialize if needed
+    setTimeout(initSpellChecker, 500);
+});
+
+

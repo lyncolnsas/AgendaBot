@@ -1,8 +1,10 @@
 :root {
     --primary: #6366f1;
     --primary-hover: #4f46e5;
-    --bg: #0f172a;
-    --card-bg: #1e293b;
+    --bg: #0B1120;
+    --card-bg: rgba(30, 41, 59, 0.45);
+    --glass-border: 1px solid rgba(255, 255, 255, 0.08);
+    --glass-top: 1px solid rgba(255, 255, 255, 0.2);
     --text: #f8fafc;
     --text-muted: #94a3b8;
     --success: #22c55e;
@@ -155,6 +157,12 @@ body {
 
 #qr-container img {
     max-width: 100%;
+}
+
+/* Override: textarea in modals should be shorter, not 300px */
+.planka-textarea {
+    height: 130px !important;
+    resize: vertical !important;
 }
 
 textarea {
@@ -328,100 +336,210 @@ button:disabled {
 
 .kanban-wrapper {
     display: flex;
-    gap: 1.5rem;
-    height: calc(100vh - 160px);
+    gap: 1rem;
+    height: calc(100vh - 155px);
 }
 
 .kanban-sidebar {
-    width: 250px;
-    background: rgba(30, 41, 59, 0.4);
-    border-radius: 1rem;
-    padding: 1.5rem;
+    width: 220px;
+    background: rgba(30, 41, 59, 0.35);
+    border-radius: 0.75rem;
+    padding: 1rem;
     border: 1px solid rgba(255, 255, 255, 0.05);
+    overflow-y: auto;
 }
 
 .kanban-board {
     flex: 1;
     display: flex;
-    gap: 1.5rem;
+    gap: 0.75rem;
     overflow-x: auto;
-    padding-bottom: 1rem;
+    padding-bottom: 0.5rem;
+    align-items: flex-start;
 }
 
+/* Trello-style column */
 .kanban-column {
-    min-width: 320px;
-    max-width: 320px;
-    background: rgba(30, 41, 59, 0.4);
-    border-radius: 1rem;
+    min-width: 282px;
+    max-width: 282px;
+    background: #1a2535;
+    border-radius: 12px;
     display: flex;
     flex-direction: column;
-    border: 1px solid rgba(255, 255, 255, 0.05);
+    max-height: 100%;
+    overflow: hidden;
 }
 
 .kanban-column-header {
-    padding: 1.25rem;
+    padding: 10px 12px 8px;
     display: flex;
     justify-content: space-between;
     align-items: center;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    flex-shrink: 0;
 }
 
 .column-title {
-    font-weight: 800;
-    font-size: 0.85rem;
-    letter-spacing: 0.05em;
-    color: var(--text-muted);
+    font-weight: 700;
+    font-size: 0.78rem;
+    letter-spacing: 0.04em;
+    color: #94a3b8;
+    text-transform: uppercase;
 }
 
 .card-count {
-    background: rgba(255, 255, 255, 0.1);
-    padding: 2px 8px;
-    border-radius: 100px;
-    font-size: 0.75rem;
-    font-weight: bold;
+    background: rgba(255,255,255,0.08);
+    color: #94a3b8;
+    padding: 1px 7px;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    min-width: 22px;
+    text-align: center;
 }
 
 .kanban-cards {
     flex: 1;
-    padding: 0.75rem;
+    padding: 8px 8px 4px;
     overflow-y: auto;
-    min-height: 100px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255,255,255,0.1) transparent;
 }
 
-/* Card Style */
+/* Trello-style card */
 .kanban-card {
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 0.75rem;
-    padding: 1.25rem;
-    margin-bottom: 0.75rem;
+    background: #253347;
+    border-radius: 8px;
+    padding: 0;
     cursor: pointer;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: box-shadow 0.15s, transform 0.15s;
     position: relative;
-    overflow: hidden;
-    backdrop-filter: blur(5px);
+    border: 1px solid rgba(255,255,255,0.06);
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
 }
 
 .kanban-card:hover {
-    background: rgba(255, 255, 255, 0.07);
-    border-color: rgba(255, 255, 255, 0.15);
-    transform: translateY(-2px);
-    box-shadow: 0 10px 20px -5px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 4px 14px rgba(0,0,0,0.35);
+    transform: translateY(-1px);
+    border-color: rgba(255,255,255,0.12);
 }
 
+.kanban-card.is-dragging {
+    opacity: 0.55;
+    transform: rotate(2deg);
+}
+
+/* Top color strip (Trello label) */
 .card-label {
-    height: 4px;
-    width: 40px;
-    border-radius: 100px;
-    margin-bottom: 12px;
+    height: 5px;
+    width: 100%;
+    border-radius: 8px 8px 0 0;
+    flex-shrink: 0;
+}
+
+.card-body {
+    padding: 10px 12px 10px;
+    flex: 1;
 }
 
 .card-title {
-    font-size: 1rem;
+    font-size: 0.88rem;
     font-weight: 600;
-    color: white;
-    margin-bottom: 12px;
+    color: #e2e8f0;
     line-height: 1.4;
+    margin-bottom: 8px;
 }
+
+/* Badges row */
+.card-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 6px;
+}
+
+.badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: rgba(255,255,255,0.07);
+    border-radius: 4px;
+    padding: 2px 7px;
+    font-size: 0.7rem;
+    color: #94a3b8;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.badge svg { flex-shrink: 0; }
+
+.badge-success {
+    background: rgba(37,211,102,0.15);
+    color: #25d366;
+}
+
+.badge-warn {
+    background: rgba(251,191,36,0.15);
+    color: #fbbf24;
+}
+
+/* Avatar row at bottom of card */
+.card-footer-avatars {
+    display: flex;
+    gap: 4px;
+    justify-content: flex-end;
+    margin-top: 4px;
+}
+
+.avatar-mini {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #6366f1, #8b5cf6);
+    font-size: 0.6rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    border: 1.5px solid #1a2535;
+}
+
+/* Add card button (Trello style) */
+.kanban-add-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
+    margin: 4px 8px 8px;
+    border-radius: 6px;
+    background: transparent;
+    border: none;
+    color: #64748b;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    text-align: left;
+    width: calc(100% - 16px);
+}
+
+.kanban-add-btn:hover {
+    background: rgba(255,255,255,0.06);
+    color: #e2e8f0;
+}
+
+/* Column accent bars */
+#col-todo    { border-top: 3px solid #6366f1; }
+#col-doing   { border-top: 3px solid #f59e0b; }
+#col-done    { border-top: 3px solid #22c55e; }
+#col-canceled { border-top: 3px solid #ef4444; }
+#col-postponed { border-top: 3px solid #f59e0b; }
+
 
 /* Modal Structure */
 .modal-overlay {
@@ -430,9 +548,9 @@ button:disabled {
     left: 0;
     width: 100%;
     height: 100%;
-    background: rgba(15, 23, 42, 0.85);
-    -webkit-backdrop-filter: blur(10px);
-    backdrop-filter: blur(10px);
+    background: rgba(8, 12, 23, 0.65);
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
     display: none;
     justify-content: center;
     align-items: center;
@@ -441,16 +559,20 @@ button:disabled {
 }
 
 .modal-container {
-    background: #1e293b;
+    background: linear-gradient(180deg, rgba(30, 41, 59, 0.65) 0%, rgba(15, 23, 42, 0.85) 100%);
     width: 100%;
-    max-width: 800px;
+    max-width: 860px;
     min-width: 320px;
-    max-height: 90vh;
-    border-radius: 1rem;
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    height: 88vh;
+    max-height: 88vh;
+    border-radius: 1.25rem;
+    border: var(--glass-border);
+    border-top: var(--glass-top);
+    box-shadow: 0 30px 60px -12px rgba(0, 0, 0, 0.9);
+    -webkit-backdrop-filter: blur(24px);
+    backdrop-filter: blur(24px);
     display: flex;
     flex-direction: column;
-    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8);
     overflow: hidden;
     animation: modalPop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
@@ -527,12 +649,16 @@ button:disabled {
 }
 
 .planka-modal-content {
-    background: #1e293b;
+    background: linear-gradient(180deg, rgba(30, 41, 59, 0.65) 0%, rgba(15, 23, 42, 0.85) 100%);
     width: 100%;
     max-width: 850px;
     max-height: 90vh;
-    border-radius: 1rem;
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 1.25rem;
+    border: var(--glass-border);
+    border-top: var(--glass-top);
+    box-shadow: 0 30px 60px -12px rgba(0, 0, 0, 0.9);
+    -webkit-backdrop-filter: blur(24px);
+    backdrop-filter: blur(24px);
     display: flex;
     flex-direction: column;
     box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
@@ -575,6 +701,7 @@ button:disabled {
 .planka-modal-layout {
     display: flex;
     flex: 1;
+    min-height: 0; /* critical: lets flex children scroll */
     overflow: hidden;
     padding: 0;
     gap: 0;
@@ -745,11 +872,18 @@ button:disabled {
 .planka-meta-grid {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
-    gap: 0.5rem 1rem;
-    background: rgba(15, 23, 42, 0.3);
-    padding: 0.75rem 1rem;
-    border-radius: 0.6rem;
-    border: 1px solid rgba(255, 255, 255, 0.05);
+    gap: 0.85rem 1rem;
+    background: rgba(15, 23, 42, 0.25);
+    padding: 1rem 1.1rem;
+    border-radius: 1rem;
+    border: var(--glass-border);
+    border-top: var(--glass-top);
+    box-shadow: inset 0 2px 10px rgba(0,0,0,0.2);
+}
+
+/* Cells that should span both columns (start & end full-width rows) */
+.planka-meta-grid .meta-box.full-row {
+    grid-column: 1 / -1;
 }
 
 .meta-box {
@@ -771,15 +905,21 @@ button:disabled {
 .meta-input,
 .planka-textarea,
 .cl-input {
-    background: rgba(15, 23, 42, 0.6) !important;
-    border: 1px solid rgba(255, 255, 255, 0.1) !important;
-    border-radius: 0.5rem !important;
-    padding: 8px 12px !important;
+    background: rgba(255, 255, 255, 0.03) !important;
+    border: var(--glass-border) !important;
+    border-top: var(--glass-top) !important;
+    border-radius: 4px !important;
+    padding: 10px 12px !important;
     color: white !important;
     font-size: 0.9rem !important;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
     width: 100%;
     outline: none !important;
+}
+
+.meta-select option {
+    background-color: #1e293b;
+    color: white;
 }
 
 .meta-select:focus,
@@ -787,9 +927,9 @@ button:disabled {
 .meta-input:focus,
 .planka-textarea:focus,
 .cl-input:focus {
-    border-color: var(--primary) !important;
-    background: rgba(15, 23, 42, 0.8) !important;
-    box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.15) !important;
+    border-color: rgba(99, 102, 241, 0.6) !important;
+    background: rgba(255, 255, 255, 0.06) !important;
+    box-shadow: 0 0 15px rgba(99, 102, 241, 0.25), inset 0 0 5px rgba(255,255,255,0.05) !important;
 }
 
 .meta-value-row {
@@ -812,11 +952,12 @@ button:disabled {
 }
 
 .sidebar-btn {
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.01) 100%);
+    border: var(--glass-border);
+    border-top: var(--glass-top);
     color: white;
-    padding: 6px 4px;
-    border-radius: 6px;
+    padding: 8px 4px;
+    border-radius: 0.75rem;
     font-size: 0.70rem;
     font-weight: 600;
     display: flex;
@@ -825,10 +966,10 @@ button:disabled {
     justify-content: center;
     gap: 4px;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: all 0.3s;
     width: 100%;
     text-align: center;
-    min-height: 50px;
+    min-height: 55px;
     overflow: hidden;
     word-break: break-word;
 }
@@ -844,6 +985,17 @@ button:disabled {
     background: rgba(255, 255, 255, 0.1);
 }
 
+.sidebar-.btn-pin-fav:hover {
+    color: var(--warning);
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.p-name-wrap .contact-dropdown {
+    margin-top: 4px; /* detach exactly like labels dropdown */
+    left: -5px;
+    top: 2px;
+}
+
 .sidebar-actions {
     margin-top: auto;
     padding-top: 2rem;
@@ -851,17 +1003,21 @@ button:disabled {
 }
 
 .btn-save {
-    background: var(--primary) !important;
+    background: linear-gradient(135deg, #6366f1, #8b5cf6) !important;
+    border: var(--glass-border) !important;
+    border-top: 1px solid rgba(255,255,255,0.4) !important;
     color: white !important;
     justify-content: center;
     font-size: 1rem;
+    font-weight: 700;
     padding: 12px !important;
+    border-radius: 0.75rem !important;
+    box-shadow: 0 4px 20px rgba(99, 102, 241, 0.5) !important;
+    transition: all 0.3s !important;
 }
-
 .btn-save:hover {
-    background: var(--primary-hover) !important;
+    box-shadow: 0 8px 30px rgba(99, 102, 241, 0.8) !important;
     transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
 }
 
 .btn-add-participant {
@@ -1118,7 +1274,64 @@ button:disabled {
 .btn-add-ghost:hover {
     background: rgba(255, 255, 255, 0.05);
     border-color: rgba(255, 255, 255, 0.25);
-    color: rgba(255, 255, 255, 0.7);
+    color: white;
+}
+
+/* ---- Contact Autocomplete Dropdown (Minimal) ---- */
+.contact-dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 12px;
+    cursor: pointer;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    transition: background 0.1s;
+}
+
+.contact-dropdown-item:last-child {
+    border-bottom: none;
+}
+
+.contact-dropdown-item:hover {
+    background: rgba(255,255,255,0.05);
+}
+
+.contact-dd-avatar {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: rgba(37,211,102,0.18);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 10px;
+    color: #25d366;
+    flex-shrink: 0;
+    letter-spacing: 0;
+}
+
+.contact-dd-info {
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
+    min-width: 0;
+}
+
+.contact-dd-name {
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: #cbd5e1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 160px;
+}
+
+.contact-dd-num {
+    font-size: 0.7rem;
+    color: #475569;
+    white-space: nowrap;
 }
 
 .attachments-list {
@@ -1559,6 +1772,170 @@ button:disabled {
     color: white;
 }
 
+/* --- Sidebar Calendar Styles (PIXEL PERFECT SQUARE) --- */
+.custom-calendar-container {
+    background: transparent;
+    padding: 0;
+    width: 100%;
+}
+
+.calendar-header-print {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 0 20px 0;
+}
+
+.month-year-wrap {
+    font-size: 1.1rem;
+    font-weight: 800;
+    color: white;
+    line-height: 1.2;
+}
+
+.nav-arrows {
+    display: flex;
+    gap: 20px;
+}
+
+.nav-btn-cal {
+    background: none;
+    border: none;
+    color: #94a3b8;
+    font-size: 1.3rem;
+    cursor: pointer;
+    padding: 0;
+}
+
+#sidebar-calendar {
+    width: 100%;
+    background: #0f172a; 
+}
+
+#sidebar-calendar .fc-header-toolbar {
+    display: none !important;
+}
+
+#sidebar-calendar .fc-col-header {
+    width: 100% !important;
+    background: white; 
+}
+
+#sidebar-calendar .fc-col-header-cell {
+    padding: 8px 0 !important;
+    font-weight: 400 !important;
+    color: #64748b;
+    text-transform: uppercase;
+    font-size: 0.85rem;
+    border: none !important;
+}
+
+/* Force Square Cells without collapsing */
+#sidebar-calendar .fc-daygrid-day {
+    cursor: pointer !important;
+    border: 1px solid rgba(255, 255, 255, 0.4) !important;
+    padding: 0 !important;
+}
+
+#sidebar-calendar .fc-daygrid-day-frame {
+    aspect-ratio: 1 / 1 !important; /* Force Square */
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    min-height: unset !important;
+    height: 100% !important;
+}
+
+#sidebar-calendar .fc-daygrid-day-top {
+    display: flex !important;
+    width: 100% !important;
+    height: 100% !important;
+    justify-content: center !important;
+    align-items: center !important;
+}
+
+#sidebar-calendar .fc-daygrid-day-number {
+    position: static !important;
+    padding: 0 !important;
+    font-size: 1.2rem;
+    color: white;
+    font-weight: 600;
+}
+
+#sidebar-calendar .fc-daygrid-day-events {
+    display: none !important;
+}
+
+#sidebar-calendar .fc-scroller {
+    overflow: hidden !important;
+    height: auto !important;
+}
+
+#sidebar-calendar .fc-daygrid-body, 
+#sidebar-calendar .fc-daygrid-body table, 
+#sidebar-calendar .fc-scrollgrid-sync-table {
+    width: 100% !important;
+}
+
+#sidebar-calendar .fc-day-other {
+    background: rgba(255, 255, 255, 0.02);
+}
+
+#sidebar-calendar .fc-day-other .fc-daygrid-day-number {
+    color: #334155 !important;
+}
+
+#sidebar-calendar .fc-day-today {
+    background: transparent !important;
+}
+
+#sidebar-calendar .fc-day-today .fc-daygrid-day-number {
+    color: #4f46e5;
+}
+
+/* Selected Day - MATCHING PRINT */
+#sidebar-calendar .selected-day {
+    background: #2563eb !important; 
+    border: 3px solid #000000 !important;
+    z-index: 10;
+}
+
+#sidebar-calendar .selected-day .fc-daygrid-day-number {
+    color: white !important;
+    font-weight: 800;
+}
+
+.calendar-footer-print {
+    display: flex;
+    gap: 10px;
+    padding-top: 20px;
+}
+
+.footer-btn-cal {
+    flex: 1;
+    background: #1e293b;
+    border: none;
+    color: #3b82f6;
+    padding: 12px;
+    border-radius: 8px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.footer-btn-cal:hover {
+    background: #334155;
+}
+
+#sidebar-calendar .fc-theme-standard .fc-scrollgrid {
+    border: none !important;
+}
+#sidebar-calendar .fc-theme-standard td, 
+#sidebar-calendar .fc-theme-standard th {
+    border: none !important;
+}
+
 .sidebar-toggle-btn.active {
     background: rgba(99, 102, 241, 0.15);
     border-color: var(--primary);
@@ -1573,19 +1950,23 @@ button:disabled {
 /* --- Quick Contacts Sidebar Grid --- */
 .quick-contacts-grid {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(3, 44px);
     gap: 8px;
     padding: 0 5px;
     margin-top: 10px;
-    justify-items: center;
+    justify-content: center;
 }
 
 .quick-contact-slot {
     width: 44px;
     height: 44px;
+    max-width: 44px;
+    max-height: 44px;
+    flex-shrink: 0;
+    aspect-ratio: 1/1;
     background: rgba(255, 255, 255, 0.05);
     border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 50%;
+    border-radius: 50% !important;
     color: var(--text-muted);
     display: flex;
     align-items: center;
@@ -1595,6 +1976,14 @@ button:disabled {
     padding: 0;
     position: relative;
     overflow: visible;
+}
+
+/* Fallback div when there is no photo */
+.quick-contact-slot > div:first-child:not(.contact-hover-card) {
+    width: 44px !important;
+    height: 44px !important;
+    border-radius: 50% !important;
+    overflow: hidden !important;
 }
 
 .quick-contact-slot:hover {
@@ -1610,6 +1999,8 @@ button:disabled {
     border-radius: 50%;
     width: 100%;
     height: 100%;
+    max-width: 44px;
+    max-height: 44px;
     object-fit: cover;
 }
 
@@ -1637,6 +2028,7 @@ button:disabled {
     align-items: center;
     gap: 8px;
     opacity: 0;
+    visibility: hidden;
     pointer-events: none;
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
@@ -1646,7 +2038,9 @@ button:disabled {
 
 .quick-contact-slot:hover .contact-hover-card {
     opacity: 1;
+    visibility: visible;
     transform: translateX(-50%) translateY(0);
+    pointer-events: auto;
 }
 
 .contact-hover-card canvas,
@@ -1679,6 +2073,8 @@ button:disabled {
 .quick-contact-slot img {
     width: 100%;
     height: 100%;
+    max-width: 44px;
+    max-height: 44px;
     border-radius: 50%;
     object-fit: cover;
     display: block;
@@ -1704,4 +2100,83 @@ button:disabled {
 
 .btn-pin-fav.active {
     color: gold;
+}
+
+/* Spell Checker Highlighter Overlay */
+.spell-highlighter-container {
+    position: relative;
+    width: 100%;
+}
+
+.spell-highlighter-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    color: transparent;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    overflow: hidden;
+    z-index: 1;
+    border: 1px solid transparent; /* Align with textarea border */
+    padding: inherit;
+    font: inherit;
+    line-height: inherit;
+}
+
+.planka-textarea, .meta-lite-input, .title-input-ghost {
+    position: relative !important;
+    z-index: 2 !important;
+    background: transparent !important;
+}
+
+.spell-error {
+    text-decoration: underline wavy var(--error);
+    text-underline-offset: 3px;
+    background: rgba(239, 68, 68, 0.1);
+    border-radius: 2px;
+    pointer-events: auto;
+    cursor: pointer;
+}
+
+/* Suggestion Menu */
+.spell-suggestions-menu {
+    position: fixed;
+    background: #1e293b;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+    z-index: 10001;
+    min-width: 150px;
+    padding: 6px;
+    display: none;
+    flex-direction: column;
+    gap: 2px;
+    animation: fadeIn 0.1s ease-out;
+}
+
+.spell-suggestion-item {
+    padding: 8px 12px;
+    color: white;
+    font-size: 0.85rem;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: background 0.2s;
+}
+
+.spell-suggestion-item:hover {
+    background: var(--primary);
+}
+
+.spell-suggestion-item.ignore {
+    color: var(--text-muted);
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    margin-top: 4px;
+}
+
+.spell-suggestion-item.ignore:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: white;
 }

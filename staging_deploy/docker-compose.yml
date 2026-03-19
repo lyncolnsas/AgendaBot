@@ -1,0 +1,32 @@
+version: '3.8'
+services:
+  agendabot:
+    build: .
+    container_name: agendabot_pi
+    restart: always
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+    volumes:
+      # Mantem credentials e sessions persistidos e a salvo da delecao do container
+      - ./credentials:/app/credentials
+      - ./auth_info_baileys:/app/auth_info_baileys
+      # Opcional caso nao queira perder uploads de anexos (remova se achar necessario no futuro)
+      - ./public/uploads:/app/public/uploads
+      
+      # [VITAL - Raspberry Pi SD Card Saver]
+      # A montagem de logs do sistema via pm2 ira direto para a RAM do Pi
+      - type: tmpfs
+        target: /var/log
+        tmpfs:
+          size: "100m" # limitando logs em ram a 100 megabytes limite
+
+    deploy:
+      resources:
+        limits:
+          cpus: '0.8'        # Reserva maximo de 80% do processamento pra ele (Evita quebrar o sistema Pi)
+          memory: 1G         # Forca o container a nao invadir toda a ram disponivel no RPI
+        reservations:
+          memory: 256M

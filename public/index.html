@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AgendaBot - Dashboard</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css?v=3.7">
 
     <!-- FullCalendar CSS and JS -->
     <script src='https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js'></script>
@@ -18,7 +18,6 @@
         </div>
         <div class="nav-item active" onclick="showPage('eventos', event)">Dashboard</div>
         <div class="nav-item" onclick="showPage('whatsapp', event)">WhatsApp</div>
-        <div class="nav-item" onclick="showPage('google', event)">Minhas Agendas</div>
         <div id="nav-logs" class="nav-item" onclick="showPage('logs', event)">Logs do Sistema</div>
         <div class="nav-item" onclick="showPage('config', event)">Configurações</div>
     </div>
@@ -56,13 +55,25 @@
                         <span class="m-val" id="metric-total-events">0</span>
                         <span class="m-lbl">Eventos</span>
                     </div>
+                    <div class="mini-metric" title="Concluídos">
+                        <span class="m-val" id="metric-completed-events" style="color: var(--success);">0</span>
+                        <span class="m-lbl">Concluídos</span>
+                    </div>
+                    <div class="mini-metric" title="Cancelados">
+                        <span class="m-val" id="metric-canceled-events" style="color: var(--error);">0</span>
+                        <span class="m-lbl">Cancelados</span>
+                    </div>
+                    <div class="mini-metric" title="Adiados">
+                        <span class="m-val" id="metric-postponed-events" style="color: var(--warning);">0</span>
+                        <span class="m-lbl">Adiados</span>
+                    </div>
                     <div class="mini-metric" title="Horas em Reunião">
                         <span class="m-val" id="metric-meeting-hours">0h</span>
                         <span class="m-lbl">Horas</span>
                     </div>
                     <div class="mini-metric" title="Próximos 7 Dias">
                         <span class="m-val" id="metric-upcoming-7d">0</span>
-                        <span class="m-lbl">Sessão</span>
+                        <span class="m-lbl">Próx 7 Dias</span>
                     </div>
                 </div>
 
@@ -76,9 +87,38 @@
             <div class="kanban-wrapper">
                 <!-- Calendars Filter Sidebar -->
                 <div class="kanban-sidebar">
-                    <div class="sidebar-top-hdr">📅 Agendas</div>
+                    <!-- Custom Calendar UI matching print -->
+                    <div class="custom-calendar-container" style="margin-bottom: 30px;">
+                        <div class="calendar-header-print">
+                            <div class="month-year-wrap">
+                                <span id="cal-month-name">março de 2026</span>
+                                <span class="dropdown-arrow">▼</span>
+                            </div>
+                            <div class="nav-arrows">
+                                <button onclick="prevMonth()" class="nav-btn-cal">↑</button>
+                                <button onclick="nextMonth()" class="nav-btn-cal">↓</button>
+                            </div>
+                        </div>
+                        
+                        <div id="sidebar-calendar"></div>
+                        
+                        <div class="calendar-footer-print">
+                            <button onclick="clearDateFilter()" class="footer-btn-cal">Limpar</button>
+                            <button onclick="goToday()" class="footer-btn-cal">Hoje</button>
+                        </div>
+                    </div>
+
+                    <div class="sidebar-top-hdr" style="display: flex; justify-content: space-between; align-items: center;">
+                        <span>📅 Agendas</span>
+                        <button onclick="openCreateCalendarModal()" style="font-size: 0.7rem; padding: 3px 6px; background: var(--success); border: none; border-radius: 4px; color: white; cursor: pointer; font-weight: bold;">+ Nova</button>
+                    </div>
                     <div id="calendar-filters-container" class="filter-list">
                         <p style="color: var(--text-muted); font-size: 0.9rem;">Carregando...</p>
+                    </div>
+                    <!-- Cache refresh controls -->
+                    <div style="margin-top: 12px; display: flex; flex-direction: column; gap: 6px;">
+                        <button id="btn-refresh-events" onclick="refreshEvents()" style="width: 100%; font-size: 0.75rem; padding: 6px 10px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; color: white; cursor: pointer; font-weight: 600; transition: background 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.15)'" onmouseout="this.style.background='rgba(255,255,255,0.08)'">🔄 Atualizar</button>
+                        <span id="cache-last-updated" style="font-size: 0.68rem; color: var(--text-muted); text-align: center;"></span>
                     </div>
                 </div>
 
@@ -95,10 +135,10 @@
                         </div>
                     </div>
 
-                    <!-- Coluna: Em Execução -->
+                    <!-- Coluna: Hoje -->
                     <div class="kanban-column" id="col-doing">
                         <div class="kanban-column-header">
-                            <span class="column-title">🚀 EM EXECUÇÃO</span>
+                            <span class="column-title">🚀 HOJE</span>
                             <span class="card-count" id="count-doing">0</span>
                         </div>
                         <div class="kanban-cards" id="cards-doing" ondrop="drop(event, 'doing')"
@@ -113,6 +153,28 @@
                             <span class="card-count" id="count-done">0</span>
                         </div>
                         <div class="kanban-cards" id="cards-done" ondrop="drop(event, 'done')"
+                            ondragover="allowDrop(event)">
+                        </div>
+                    </div>
+
+                    <!-- Coluna: Cancelado -->
+                    <div class="kanban-column" id="col-canceled">
+                        <div class="kanban-column-header">
+                            <span class="column-title">❌ CANCELADO</span>
+                            <span class="card-count" id="count-canceled">0</span>
+                        </div>
+                        <div class="kanban-cards" id="cards-canceled" ondrop="drop(event, 'canceled')"
+                            ondragover="allowDrop(event)">
+                        </div>
+                    </div>
+
+                    <!-- Coluna: Adiado -->
+                    <div class="kanban-column" id="col-postponed">
+                        <div class="kanban-column-header">
+                            <span class="column-title">⏳ ADIADO</span>
+                            <span class="card-count" id="count-postponed">0</span>
+                        </div>
+                        <div class="kanban-cards" id="cards-postponed" ondrop="drop(event, 'postponed')"
                             ondragover="allowDrop(event)">
                         </div>
                     </div>
@@ -135,13 +197,18 @@
                 <div id="qr-container">
                     <div id="qr-message">Conectando ao conector...</div>
                 </div>
-                <div id="wa-status-text" class="status" style="justify-content: center; margin-bottom: 1rem;">
+                <div id="wa-status-text" class="status" style="justify-content: center; margin-bottom: 2rem;">
                     Aguardando...
                 </div>
-                <button id="btn-disconnect-wa" onclick="disconnectWhatsApp()" class="btn-primary"
-                    style="display: none; background: #ff4444; margin-top: 20px;">Desconectar WhatsApp</button>
-                <button id="btn-sync-contacts" onclick="loadContacts()" class="btn-primary"
-                    style="display: block; background: var(--primary); margin-top: 10px;">🔄 Atualizar Contatos</button>
+
+
+
+                <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 20px;">
+                    <button id="btn-disconnect-wa" onclick="disconnectWhatsApp()" class="btn-primary"
+                        style="display: none; background: #ff4444;">Desconectar WhatsApp</button>
+                    <button id="btn-sync-contacts" onclick="loadContacts()" class="btn-primary"
+                        style="display: block; background: var(--primary);">🔄 Atualizar Contatos <span id="contact-count-badge" style="background: rgba(0,0,0,0.3); padding: 2px 8px; border-radius: 10px; font-size: 0.8rem; margin-left: 5px; display: none;">0</span></button>
+                </div>
             </div>
         </div>
 
@@ -193,9 +260,20 @@
             </div>
         </div>
 
-        <!-- Configuration Page -->
         <div id="config" class="page">
             <h1 class="title">Configurações do Sistema</h1>
+
+            <div class="card" style="margin-bottom: 2rem;">
+                <div class="card-title" style="display: flex; align-items: center; justify-content: space-between;">
+                    <span><i data-lucide="download-cloud" style="color: var(--primary);"></i> Backup do Sistema</span>
+                    <a href="/v1/system/backup" download class="btn-primary" style="background: var(--primary); text-decoration: none; display: inline-flex; align-items: center; gap: 8px;">
+                        <i data-lucide="download" style="width: 16px; height: 16px;"></i> Baixar Backup (.ZIP)
+                    </a>
+                </div>
+                <p style="margin-top: 10px; font-size: 0.9rem; color: var(--text-muted);">
+                    Baixe um arquivo compactado contendo todo o estado atual do bot: Mapeamento do SQLite local, Sessão de Conexão do WhatsApp Web e Chaves do Google Calendar. Use isso para migrar o robô de máquina ou guardar de segurança.
+                </p>
+            </div>
 
             <div class="card" style="margin-bottom: 2rem;">
                 <div class="card-title">Contas de Serviço (JSON)</div>
@@ -209,46 +287,35 @@
                 </ul>
 
                 <hr style="border: none; border-top: 1px solid rgba(255,255,255,0.1); margin-bottom: 1.5rem;">
-
-                <div class="card-title" style="font-size: 1rem;">Adicionar Nova Conta de Serviço</div>
+                
+                <div class="card-title" style="font-size: 1rem; color: #4285F4;"><i data-lucide="shield"></i> Autenticação via OAuth (Para Uso Pessoal)</div>
                 <p style="margin-bottom: 1rem; font-size: 0.85rem; color: var(--text-muted);">
-                    Cole o conteúdo do seu arquivo JSON de <strong>Conta de Serviço</strong> abaixo:
+                    Se você possui um arquivo JSON de <strong>ID do Cliente OAuth 2.0</strong>, faça o upload aqui. Isso permitirá que você autorize o bot a acessar sua conta Google pessoal (abrindo uma janela de login).
                 </p>
-                <textarea id="new-credentials-json" placeholder='{"type": "service_account", ...}'
-                    style="width: 100%; height: 150px; padding: 10px; border-radius: 4px; border: none; background: rgba(0,0,0,0.3); color: #00ff00; font-family: monospace; font-size: 0.8rem; margin-bottom: 15px;"></textarea>
-                <button onclick="addCredentials()"
-                    style="background: var(--success); color: white; padding: 10px 25px; border-radius: 4px; cursor: pointer; border: none; font-weight: bold;">+
-                    Adicionar Conta JSON</button>
-                <div id="credential-status" style="margin-top: 1rem;"></div>
-            </div>
-
-            <div class="card premium-admin-card">
-                <div class="card-title"><i data-lucide="bell" class="title-icon"></i> Notificações do Administrador
+                
+                <div style="display: flex; gap: 10px; margin-bottom: 15px; align-items: center;">
+                    <input type="file" id="oauth-file-input" accept=".json" style="flex: 1; padding: 8px; background: rgba(0,0,0,0.3); border-radius: 4px; border: 1px solid rgba(255,255,255,0.1); color: white;">
+                    <button onclick="uploadOAuthJson()" style="background: var(--primary); color: white; padding: 10px 20px; border-radius: 4px; border: none; font-weight: bold; cursor: pointer; white-space: nowrap;">
+                        <i data-lucide="upload" style="width: 16px; height: 16px; vertical-align: middle; margin-right: 5px;"></i> Enviar JSON OAuth
+                    </button>
                 </div>
-                <p style="margin-bottom: 1.2rem; font-size: 0.9rem; color: var(--text-muted); line-height: 1.5;">
-                    Defina o número mestre que receberá o <strong>Resumo Diário (08:00)</strong> de todos os eventos e
-                    lembretes de sistema.
-                </p>
-
-                <div class="config-row-standard">
-                    <div class="input-group-premium">
-                        <label class="premium-label">NÚMERO MASTER (COM DDD)</label>
-                        <div class="premium-input-wrapper">
-                            <i data-lucide="phone" class="input-icon-sw"></i>
-                            <input type="text" id="notification-phone" placeholder="Ex: 5511999999999"
-                                class="meta-lite-input">
-                        </div>
+                
+                <div id="oauth-status" style="margin-top: 1rem; margin-bottom: 2rem; padding: 15px; border-radius: 8px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <span style="font-weight: bold; display: block; margin-bottom: 5px; color: white;">Status do OAuth:</span>
+                        <span id="oauth-status-text" style="color: var(--warning); font-size: 0.9rem;">⏳ Aguardando...</span>
                     </div>
-                    <button onclick="saveNotificationSettings()" class="btn-primary-premium">
-                        <i data-lucide="save"></i> Salvar Configuração
+                    <button id="btn-oauth-login" onclick="loginOAuth()" style="background: #4285F4; color: white; padding: 10px 20px; border-radius: 4px; border: none; font-weight: bold; cursor: pointer; display: none; align-items: center; gap: 8px;">
+                        <img src="https://upload.wikimedia.org/wikipedia/commons/c/c1/Google_%22G%22_logo.svg" alt="Google" style="width: 16px; height: 16px; background: white; border-radius: 50%; padding: 2px;">
+                        Fazer Login com o Google
+                    </button>
+                    <button id="btn-oauth-logout" onclick="logoutOAuth()" style="background: rgba(255, 68, 68, 0.2); color: #ff4444; border: 1px solid #ff4444; padding: 10px 20px; border-radius: 4px; font-weight: bold; cursor: pointer; display: none; align-items: center; gap: 8px;">
+                        <i data-lucide="log-out" style="width: 16px; height: 16px;"></i> Desconectar
                     </button>
                 </div>
 
-                <div id="notification-status"></div>
-                <p class="premium-note-footer">
-                    * Use o formato internacional: <code>55</code> + <code>DDD</code> + <code>Número</code>.
-                </p>
             </div>
+
 
             <div class="card" style="margin-top: 2rem; border: 1px solid rgba(255, 68, 68, 0.3);">
                 <div class="card-title" style="color: #ff4444;">Reiniciar o Sistema</div>
@@ -264,7 +331,6 @@
         </div>
     </div>
 
-    <!-- Event Create/Edit Modal -->
     <!-- Event Create/Edit Modal -->
     <div id="event-modal" class="modal-overlay">
         <div class="modal-container">
@@ -285,14 +351,12 @@
                     <!-- Labels Row -->
                     <div class="planka-section">
                         <div class="section-label">ETIQUETA (COR)</div>
-                        <div id="modal-label-container" class="label-list">
-                            <div id="color-picker" class="color-picker-grid">
-                                <!-- Bolinhas will be injected by JS -->
-                            </div>
+                        <div id="color-picker" class="color-picker-grid">
+                            <!-- Bolinhas will be injected by JS -->
                         </div>
                     </div>
 
-                    <!-- Meta Data Grid (Planka Style) -->
+                    <!-- Meta Data Grid -->
                     <div class="planka-section">
                         <div class="section-header"><span><i data-lucide="settings"></i> Configurações</span></div>
                         <div class="planka-meta-grid">
@@ -307,19 +371,20 @@
                                 <div class="meta-label">AGENDA</div>
                                 <select id="event-calendar" class="meta-select" title="Selecione a Agenda"></select>
                             </div>
+
                             <div class="meta-box">
-                                <div class="meta-label">LIGAÇÃO REMOTA</div>
-                                <select id="event-call-reminder" class="meta-select" title="Lembrete por Ligação">
-                                    <option value="">Desativado</option>
-                                    <option value="10">10 Minutos antes</option>
-                                    <option value="15">15 Minutos antes</option>
-                                    <option value="30">30 Minutos antes</option>
+                                <div class="meta-label">STATUS ATUAL</div>
+                                <select id="event-status" class="meta-select">
+                                    <option value="todo">🕒 AGENDADO</option>
+                                    <option value="done">✅ CONCLUÍDO</option>
+                                    <option value="canceled">❌ CANCELADO</option>
+                                    <option value="postponed">⏳ ADIADO</option>
                                 </select>
                             </div>
+
                             <div class="meta-box">
                                 <div class="meta-label">LOCAL / SALA</div>
-                                <input type="text" id="event-location" class="meta-lite-input"
-                                    placeholder="Ex: Sala 01 ou Meet">
+                                <input type="text" id="event-location" class="meta-lite-input" placeholder="Ex: Sala 01 ou Meet">
                             </div>
                             <div class="meta-box">
                                 <div class="meta-label">INÍCIO</div>
@@ -340,11 +405,8 @@
 
                     <!-- Description -->
                     <div class="planka-section">
-                        <div class="section-header">
-                            <span><i data-lucide="align-left"></i> Descrição</span>
-                        </div>
-                        <textarea id="event-description" class="planka-textarea"
-                            placeholder="Adicione uma descrição detalhada..."></textarea>
+                        <div class="section-header"><span><i data-lucide="align-left"></i> Descrição</span></div>
+                        <textarea id="event-description" class="planka-textarea" placeholder="Adicione uma descrição detalhada..."></textarea>
                     </div>
 
                     <!-- Attachments -->
@@ -353,21 +415,15 @@
                         <div id="attachments-list" class="attachments-grid"></div>
                         <div id="attachment-input-container" class="attachment-add-row" style="display: none;">
                             <i data-lucide="link" class="input-icon-sw"></i>
-                            <input type="text" id="new-attachment-url" class="meta-lite-input"
-                                placeholder="Cole um link (Google Drive, YouTube, PDF...)">
+                            <input type="text" id="new-attachment-url" class="meta-lite-input" placeholder="Cole um link (Google Drive, YouTube, PDF...)">
                             <button onclick="addAttachment()" class="btn-primary-sm">+ Link</button>
-                            <button onclick="uploadAndAddAttachment()" class="btn-primary-sm"
-                                title="Enviar arquivo do computador"
-                                style="background:linear-gradient(135deg,#7c3aed,#4f46e5);">📁 Arquivo</button>
+                            <button onclick="uploadAndAddAttachment()" class="btn-primary-sm" title="Enviar arquivo" style="background:linear-gradient(135deg,#7c3aed,#4f46e5);">📁 Arquivo</button>
                         </div>
-                        <!-- Hidden file input used by uploadAndAddAttachment() -->
                         <input type="file" id="attachment-file-input" style="display:none" accept="*/*">
                     </div>
 
                     <!-- Checklists -->
-                    <div id="checklists-wrapper">
-                        <!-- Checklists generated here -->
-                    </div>
+                    <div id="checklists-wrapper"></div>
 
                     <!-- Participants / Groups -->
                     <div class="planka-section">
@@ -381,23 +437,18 @@
                                     <option value="existing">Grupo Existente</option>
                                 </select>
                             </div>
-
                             <div id="group-create-fields" class="meta-box group-field">
                                 <div class="meta-label">NOME DO NOVO GRUPO</div>
-                                <input type="text" id="event-group-name" class="meta-lite-input"
-                                    placeholder="Ex: Projeto Alpha">
+                                <input type="text" id="event-group-name" class="meta-lite-input" placeholder="Ex: Projeto Alpha">
                             </div>
-
                             <div id="group-existing-fields" class="meta-box group-field">
                                 <div class="meta-label">PESQUISAR GRUPO</div>
                                 <div class="group-select-row">
                                     <select id="event-group-jid" class="meta-select flex-1"></select>
-                                    <button class="btn-ghost-sm" onclick="loadWhatsAppGroups()"><i
-                                            data-lucide="refresh-cw" style="width:14px;height:14px;"></i></button>
+                                    <button class="btn-ghost-sm" onclick="loadWhatsAppGroups()"><i data-lucide="refresh-cw" style="width:14px;height:14px;"></i></button>
                                 </div>
                             </div>
                         </div>
-
                         <div class="section-label" style="margin-top: 20px;">PARTICIPANTES</div>
                         <div id="participants-container" class="planka-participants"></div>
                     </div>
@@ -408,62 +459,35 @@
                     <div class="sidebar-group">
                         <div class="sidebar-title">ADICIONAR</div>
                         <div class="sidebar-grid-2">
-                            <button class="sidebar-btn" onclick="addParticipantRow()" data-tooltip="Adicionar membro">
-                                <i data-lucide="user-plus"></i> <span>Membros</span>
+                            <button class="sidebar-btn" onclick="addParticipantRow()" data-tooltip="Novo Participante">
+                                <i data-lucide="user-plus"></i> <span>Participante</span>
                             </button>
                             <button class="sidebar-btn" onclick="addChecklistUI()" data-tooltip="Nova tarefa">
                                 <i data-lucide="check-square"></i> <span>Tarefas</span>
                             </button>
-                            <button class="sidebar-btn" onclick="toggleAttachmentInput()"
-                                data-tooltip="Adicionar anexo">
+                            <button class="sidebar-btn" onclick="toggleAttachmentInput()" style="grid-column: span 2;" data-tooltip="Adicionar anexo">
                                 <i data-lucide="paperclip"></i> <span>Anexar</span>
-                            </button>
-                            <button class="sidebar-btn" onclick="addParticipantRow()"
-                                data-tooltip="Novo contato do WhatsApp">
-                                <i data-lucide="phone"></i> <span>Contato</span>
                             </button>
                         </div>
                     </div>
 
-                    <!-- Quick Contacts Slots -->
-                    <div class="sidebar-mini-label" style="margin-top: 10px; margin-left: 5px;">CONTATOS FAVORITOS
-                    </div>
+                    <div class="sidebar-mini-label" style="margin-top: 10px; margin-left: 5px;">CONTATOS FAVORITOS</div>
                     <div class="quick-contacts-grid">
-                        <button class="quick-contact-slot" id="fav-slot-0" onclick="addFromFavorite(0)"
-                            data-tooltip="Adicionar contato favorito 1">
-                            <i data-lucide="star"></i>
-                        </button>
-                        <button class="quick-contact-slot" id="fav-slot-1" onclick="addFromFavorite(1)"
-                            data-tooltip="Adicionar contato favorito 2">
-                            <i data-lucide="star"></i>
-                        </button>
-                        <button class="quick-contact-slot" id="fav-slot-2" onclick="addFromFavorite(2)"
-                            data-tooltip="Adicionar contato favorito 3">
-                            <i data-lucide="star"></i>
-                        </button>
-                        <button class="quick-contact-slot" id="fav-slot-3" onclick="addFromFavorite(3)"
-                            data-tooltip="Adicionar contato favorito 4">
-                            <i data-lucide="star"></i>
-                        </button>
-                        <button class="quick-contact-slot" id="fav-slot-4" onclick="addFromFavorite(4)"
-                            data-tooltip="Adicionar contato favorito 5">
-                            <i data-lucide="star"></i>
-                        </button>
-                        <button class="quick-contact-slot" id="fav-slot-5" onclick="addFromFavorite(5)"
-                            data-tooltip="Adicionar contato favorito 6">
-                            <i data-lucide="star"></i>
-                        </button>
+                        <div class="quick-contact-slot" id="fav-slot-0" onclick="addFromFavorite(0)" data-tooltip="Adicionar contato favorito 1"><i data-lucide="star"></i></div>
+                        <div class="quick-contact-slot" id="fav-slot-1" onclick="addFromFavorite(1)" data-tooltip="Adicionar contato favorito 2"><i data-lucide="star"></i></div>
+                        <div class="quick-contact-slot" id="fav-slot-2" onclick="addFromFavorite(2)" data-tooltip="Adicionar contato favorito 3"><i data-lucide="star"></i></div>
+                        <div class="quick-contact-slot" id="fav-slot-3" onclick="addFromFavorite(3)" data-tooltip="Adicionar contato favorito 4"><i data-lucide="star"></i></div>
+                        <div class="quick-contact-slot" id="fav-slot-4" onclick="addFromFavorite(4)" data-tooltip="Adicionar contato favorito 5"><i data-lucide="star"></i></div>
+                        <div class="quick-contact-slot" id="fav-slot-5" onclick="addFromFavorite(5)" data-tooltip="Adicionar contato favorito 6"><i data-lucide="star"></i></div>
                     </div>
 
                     <div class="sidebar-group">
                         <div class="sidebar-title">MODO GRUPO</div>
                         <div class="sidebar-grid-2">
-                            <button id="mode-btn-create" class="sidebar-btn" onclick="syncGroupMode('create')"
-                                data-tooltip="Criar um grupo novo">
+                            <button id="mode-btn-create" class="sidebar-btn" onclick="syncGroupMode('create')" data-tooltip="Criar um grupo novo">
                                 <i data-lucide="plus-square"></i> <span>Novo</span>
                             </button>
-                            <button id="mode-btn-existing" class="sidebar-btn" onclick="syncGroupMode('existing')"
-                                data-tooltip="Selecionar grupo existente">
+                            <button id="mode-btn-existing" class="sidebar-btn" onclick="syncGroupMode('existing')" data-tooltip="Selecionar grupo existente">
                                 <i data-lucide="search"></i> <span>Selecionar</span>
                             </button>
                         </div>
@@ -471,21 +495,15 @@
 
                     <div class="sidebar-group sidebar-actions" style="margin-top: auto; padding-top: 10px;">
                         <div class="sidebar-title">AÇÕES</div>
-                        <div class="sidebar-grid-2">
-                            <button id="btn-save-event" class="sidebar-btn btn-save" onclick="submitEvent()"
-                                data-tooltip="Salvar e Notificar">
-                                <i data-lucide="save"></i> <strong>Salvar</strong>
+                        <div style="display: flex; gap: 12px; margin-top: 10px;">
+                            <button id="btn-save-event" class="sidebar-btn btn-save" onclick="submitEvent()" style="flex: 1.5; min-height: 55px; border-radius: 12px;" data-tooltip="Salvar e Notificar">
+                                <i data-lucide="save"></i>
                             </button>
-                            <button id="btn-edit-mode" class="sidebar-btn" onclick="toggleModalEditMode(true)"
-                                style="display:none;" data-tooltip="Mudar para Edição">
-                                <i data-lucide="edit-3"></i> Editar
+                            <button class="sidebar-btn close-modal-btn" onclick="closeModal()" style="flex: 1; min-height: 55px; border-radius: 12px; background: rgba(255,255,255,0.03);" data-tooltip="Fechar">
+                                <i data-lucide="x"></i>
                             </button>
-                            <button class="sidebar-btn close-modal-btn" onclick="closeModal()" data-tooltip="Fechar">
-                                <i data-lucide="x"></i> Fechar
-                            </button>
-                            <button id="btn-delete-event" class="sidebar-btn danger" onclick="deleteEvent()"
-                                data-tooltip="Excluir Permanentemente">
-                                <i data-lucide="trash-2"></i> Exc.
+                            <button id="btn-delete-event" class="sidebar-btn danger" onclick="deleteEvent()" style="flex: 1; min-height: 55px; border-radius: 12px; background: rgba(255,255,255,0.03); color: #94a3b8;" data-tooltip="Excluir Permanentemente">
+                                <i data-lucide="trash-2"></i>
                             </button>
                         </div>
                     </div>
@@ -519,11 +537,70 @@
         </div>
     </div>
 
+    <div id="status-modal" class="modal-overlay" style="z-index: 10000; background: rgba(0,0,0,0.85);">
+        <div class="modal-container" style="max-width: 450px; padding: 30px; text-align: center; border-top: 4px solid var(--primary);">
+            <div style="margin-bottom: 20px;">
+                <i data-lucide="calendar-check" style="width: 48px; height: 48px; color: var(--primary); margin: 0 auto;"></i>
+            </div>
+            <h2 id="status-modal-title" style="font-size: 1.4rem; color: white; margin-bottom: 15px;">Atualização de Atividade</h2>
+            <p style="color: var(--text-muted); margin-bottom: 25px; line-height: 1.5;">O prazo para a seguinte atividade expirou. Por favor, informe o status final para mantermos a agenda organizada:</p>
+            
+            <div id="status-modal-event-name" style="background: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; font-weight: bold; color: white; margin-bottom: 25px; font-size: 1.1rem; border-left: 3px solid var(--primary); text-align: left;">
+                Nome do Evento
+            </div>
+
+            <div style="display: flex; flex-direction: column; gap: 12px;">
+                <button onclick="answerStatusModal('done')" style="background: var(--success); color: white; border: none; padding: 12px; border-radius: 6px; font-weight: bold; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 1rem; transition: transform 0.1s;">
+                    <i data-lucide="check-circle" style="width: 20px; height: 20px;"></i> Concluída
+                </button>
+                <button onclick="answerStatusModal('canceled')" style="background: var(--error); color: white; border: none; padding: 12px; border-radius: 6px; font-weight: bold; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 1rem; transition: transform 0.1s;">
+                    <i data-lucide="x-circle" style="width: 20px; height: 20px;"></i> Cancelada
+                </button>
+                <div style="display: flex; gap: 12px;">
+                    <button onclick="answerStatusModal('postponed_today')" style="background: var(--warning); color: #1e293b; border: none; padding: 12px; border-radius: 6px; font-weight: bold; cursor: pointer; flex: 1; font-size: 0.9rem; transition: transform 0.1s;">
+                        Adiar p/ Hoje
+                    </button>
+                    <button onclick="answerStatusModal('postponed')" style="background: var(--warning); color: #1e293b; border: none; padding: 12px; border-radius: 6px; font-weight: bold; cursor: pointer; flex: 1; font-size: 0.9rem; transition: transform 0.1s;">
+                        Adiar (Outro dia)
+                    </button>
+                </div>
+            </div>
+            <input type="hidden" id="status-modal-event-id" value="">
+        </div>
+    </div>
+
     <script src="https://unpkg.com/lucide@latest"></script>
-    <script src="script.js?v=2.7"></script>
+    <script src="script.js?v=3.8"></script>
     <script>
         lucide.createIcons();
     </script>
-</body>
+    <!-- Calendar Modal -->
+    <div id="calendar-modal" class="modal-overlay">
+        <div class="modal-container" style="max-width: 400px; padding: 25px;">
+            <div class="modal-header" style="border-bottom: 1px solid rgba(255, 255, 255, 0.05); padding-bottom: 15px; margin-bottom: 15px;">
+                <h2 style="font-size: 1.2rem;">CRIAR NOVA AGENDA</h2>
+                <span class="btn-close-ghost" onclick="closeCreateCalendarModal()"><i data-lucide="x"></i></span>
+            </div>
+            
+            <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 20px;">
+                A agenda será criada na sua conta principal do Google e espelhada no app local.
+            </p>
 
+            <div style="display: flex; flex-direction: column; gap: 15px;">
+                <div>
+                    <label style="color: white; font-weight: bold; margin-bottom: 5px; display: block;">Nome da Agenda <span style="color: var(--danger);">*</span></label>
+                    <input type="text" id="calendar-summary" class="meta-input" placeholder="Ex: Aniversários, Trabalho...">
+                </div>
+                <div>
+                    <label style="color: white; font-weight: bold; margin-bottom: 5px; display: block;">Descrição</label>
+                    <textarea id="calendar-description" class="planka-textarea" placeholder="Uma breve descrição..." rows="3" style="resize: vertical;"></textarea>
+                </div>
+                <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 15px;">
+                    <button class="sidebar-btn" style="background: rgba(255,255,255,0.1); color: white; padding: 10px 15px;" onclick="closeCreateCalendarModal()">Cancelar</button>
+                    <button class="sidebar-btn btn-save" style="padding: 10px 15px;" onclick="saveCalendar()">+ Criar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
 </html>
