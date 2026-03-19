@@ -13,6 +13,16 @@ Sistema completo para integração de WhatsApp com Google Calendar, permitindo a
 
 ## 🚀 Como Executar
 
+O projeto pode ser instalado rapidamente no Linux/Raspberry Pi usando o Docker.
+
+### Instalação Rápida (Script)
+```bash
+bash scripts/install.sh
+```
+
+Para instruções detalhadas de configuração do Google Calendar e WhatsApp, consulte o **[Guia de Instalação Completa (INSTALL.md)](INSTALL.md)**.
+
+### Local (Desenvolvimento)
 1. Instale as dependências: `npm install`
 2. Inicie em modo desenvolvimento: `npm run dev`
 3. Acesse: `http://localhost:3001`
