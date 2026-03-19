@@ -49,13 +49,13 @@ mkdir -p credentials auth_info_baileys public/uploads
 [ ! -f notification.json ] && echo '{"whatsappNumber": "55000000000@s.whatsapp.net"}' > notification.json
 [ ! -f calendar_id.txt ] && touch calendar_id.txt
 
-# 3. Build e Start (Forçado)
+# 3. Build e Start
 echo "📦 Construindo containers (Processo Silencioso)..."
-docker compose down --remove-orphans > /dev/null 2>&1
-docker compose build --no-cache
+echo "⚠️ NOTA: Se você está no Raspberry Pi, isso pode demorar."
+echo "💡 Dica: Se o build falhar (OOM), tente rodar './install.ps1' no seu Windows."
 
-echo "⚡ Subindo AgendaBot..."
-docker compose up -d
+docker compose down --remove-orphans > /dev/null 2>&1
+docker compose up -d --build
 
 # 4. Finalização e Pronto para Uso
 echo "---------------------------------------------------"
